@@ -11,6 +11,7 @@ pub enum HLExpr {
 	PropAccess(Box<HLExpr>, Symbol),
 	Call(Box<HLExpr>, Vec<HLExpr>),
 	If(Box<HLExpr>, Box<HLExpr>, Option<Box<HLExpr>>),
+	Let(Symbol, Box<HLExpr>),
 	CodeBlock(Vec<HLExpr>),
 	Int(ParseResult<i64>),
 	Real(ParseResult<f64>),
@@ -21,9 +22,11 @@ pub enum HLExpr {
 pub enum Expr {
 	LocalGet(Symbol),
 	LocalSet(Symbol, Box<Expr>),
+	GlobalGet(QualID),
 	FunctionCall(QualID, Vec<Expr>),
 	MethodCall(Box<Expr>, Symbol, Vec<Expr>),
 	If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+	Let(Symbol, Box<Expr>),
 	CodeBlock(Vec<Expr>),
 	Int(ParseResult<i64>),
 	Real(ParseResult<f64>),
@@ -40,9 +43,15 @@ pub enum TypeDef {
 pub type FuncArg = (QualID, Symbol);
 
 #[derive(Debug)]
+pub enum FuncType {
+	Function,
+	Method
+}
+
+#[derive(Debug)]
 pub enum GlobalDef {
 	Type(QualID, TypeDef),
-	Func(QualID, Vec<FuncArg>, QualID, HLExpr)
+	Func(QualID, FuncType, Vec<FuncArg>, QualID, HLExpr)
 }
 
 pub type Program = Vec<GlobalDef>;

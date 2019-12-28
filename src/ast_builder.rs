@@ -14,7 +14,7 @@ fn parse_id(pair: Pair) -> Symbol {
 	pair.as_str().into()
 }
 
-fn parse_qualified_id(pair: Pair) -> Vec<Symbol> {
+fn parse_qualified_id(pair: Pair) -> QualID {
 	assert_eq!(pair.as_rule(), Rule::qualifiedID);
 	pair.into_inner().map(parse_id).collect()
 }
@@ -98,6 +98,12 @@ fn parse_term_piece(pair: Pair) -> HLExpr {
 		Rule::real => HLExpr::Real(pair.as_str().parse()),
 		Rule::int => HLExpr::Int(pair.as_str().parse()),
 		Rule::ifTerm => parse_if_piece(&mut pair.into_inner().peekable()),
+		Rule::letTerm => {
+			let mut pairs = pair.into_inner();
+			let name = parse_id(pairs.next().unwrap());
+			let value = Box::new(parse_hlexpr(pairs.next().unwrap()));
+			HLExpr::Let(name, value)
+		}
 		Rule::expr => parse_hlexpr(pair),
 		_ => unreachable!()
 	}
@@ -122,12 +128,20 @@ fn parse_type_def(pair: Pair) -> TypeDef {
 	}
 }
 
-fn parse_func_spec(pair: Pair) -> (QualID, Vec<FuncArg>) {
+fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<FuncArg>) {
 	assert_eq!(pair.as_rule(), Rule::funcSpec);
 	let mut pairs = pair.into_inner();
 	let func_name = parse_qualified_id(pairs.next().unwrap());
+
+	let mut func_type = FuncType::Function;
+	if let Some(p) = pairs.peek() {
+		if p.as_rule() == Rule::funcSelfArg {
+			func_type = FuncType::Method;
+			pairs.next();
+		}
+	}
 	let func_args = pairs.map(parse_func_arg).collect();
-	(func_name, func_args)
+	(func_name, func_type, func_args)
 }
 
 fn parse_func_arg(pair: Pair) -> FuncArg {
@@ -151,8 +165,8 @@ fn parse_global_def(pair: Pair) -> GlobalDef {
 			let spec = pairs.next().unwrap();
 			let ret_type = pairs.next().unwrap();
 			let code = pairs.next().unwrap();
-			let (func_name, args) = parse_func_spec(spec);
-			GlobalDef::Func(func_name, args, parse_qualified_id(ret_type), parse_code_block(code))
+			let (func_name, func_type, args) = parse_func_spec(spec);
+			GlobalDef::Func(func_name, func_type, args, parse_qualified_id(ret_type), parse_code_block(code))
 		},
 		_ => panic!("unknown global def type {:?}", pair)
 	}

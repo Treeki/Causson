@@ -2,20 +2,22 @@ WHITESPACE = _{" " | "\t"}
 COMMENT = _{"--" ~ (!NEWLINE ~ ANY)*}
 
 id = @{identifierStart ~ identifierChar*}
-  identifierStart = {XID_START | "_"}
-  identifierChar = {XID_START | XID_CONTINUE | "_" | "#" | "<" | ">" | "="}
+  identifierStart = _{XID_START | "_"}
+  identifierChar = _{XID_START | XID_CONTINUE | "_" | "#" | idAllowedOpChars}
+  idAllowedOpChars = _{"+" | "-" | "*" | "/" | "<" | ">" | "=" | "!"}
 
 qualifiedID = {(id ~ ":")* ~ id}
 
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
-    termPiece = _{ifTerm | bTrue | bFalse | qualifiedID | real | int | ("(" ~ expr ~ ")")}
+    termPiece = _{ifTerm | letTerm | bTrue | bFalse | qualifiedID | real | int | ("(" ~ expr ~ ")")}
       int = @{("+" | "-")? ~ ASCII_DIGIT+}
       real = @{int ~ "." ~ ASCII_DIGIT*}
       bTrue = {"true"}
       bFalse = {"false"}
       ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}
+      letTerm = {"let" ~ id ~ "=" ~ expr}
     termSuffix = _{termCall | termPropAccess}
       termPropAccess = {"." ~ id}
       termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}
@@ -41,7 +43,8 @@ gTypeDef = {"type" ~ qualifiedID ~ "=" ~ typeDef}
     wrapDef = {"wrap" ~ qualifiedID}
 
 gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
-  funcSpec = {qualifiedID ~ (("(" ~ ")") | ("(" ~ (funcArg ~ ",")* ~ funcArg ~ ")"))}
+  funcSpec = {qualifiedID ~ (("(" ~ funcSelfArg? ~ ")") | ("(" ~ (funcSelfArg ~ ",")? ~ (funcArg ~ ",")* ~ funcArg ~ ")"))}
+    funcSelfArg = {"self"}
     funcArg = {qualifiedID ~ id}
 
 globalDef = {gTypeDef | gFuncDef}

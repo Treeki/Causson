@@ -12,7 +12,7 @@ mod ast_builder;
 mod parser;
 
 fn main() {
-    let code = std::fs::read_to_string("sample/expr.causson").unwrap();
+    let code = std::fs::read_to_string("sample/temperature.causson").unwrap();
     match ast_builder::parse_causson_code(&code) {
         Ok(result) => {
             parser::magic(&result);

@@ -1,25 +1,34 @@
 type WeatherState = enum(Freezing, Cold, Warm, Hot)
 
-type Celsius = real
-type Fahrenheit = real
+type Celsius = wrap real
+type Fahrenheit = wrap real
 
-def Celsius.toFahrenheit() -> Fahrenheit {
-	--let real base = self.unpack()
+-- these need to be built-in
+-- but are just here to satisfy the type checker right now
+def real:op#+(real v) -> real { 0. }
+def real:op#-(real v) -> real { 0. }
+def real:op#*(real v) -> real { 0. }
+def real:op#/(real v) -> real { 0. }
+def real:op#<(real v) -> bool { false }
+def real:op#>(real v) -> bool { false }
+
+def Celsius:toFahrenheit(self) -> Fahrenheit {
+	let base = self.unwrap()
 	base = base * (9. / 5.)
-	base = base + 32
-	Fahrenheit::pack(base)
+	base = base + 32.
+	Fahrenheit:wrap(base)
 }
 
-def Celsius.toState() -> WeatherState {
-	--let real base = self.unpack()
-	if base < 0 {
-		WeatherState::Freezing
-	} elif base < 15 {
-		WeatherState::Cold
-	} elif base < 25 {
-		WeatherState::Warm
+def Celsius:toState(self) -> WeatherState {
+	let base = self.unwrap()
+	if base < 0. {
+		WeatherState:Freezing
+	} elif base < 15. {
+		WeatherState:Cold
+	} elif base < 25. {
+		WeatherState:Warm
 	} else {
-		WeatherState::Hot
+		WeatherState:Hot
 	}
 }
 
