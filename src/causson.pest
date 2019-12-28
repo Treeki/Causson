@@ -1,0 +1,50 @@
+WHITESPACE = _{" " | "\t"}
+COMMENT = _{"--" ~ (!NEWLINE ~ ANY)*}
+
+id = @{identifierStart ~ identifierChar*}
+  identifierStart = {XID_START | "_"}
+  identifierChar = {XID_START | XID_CONTINUE | "_" | "#" | "<" | ">" | "="}
+
+qualifiedID = {(id ~ ":")* ~ id}
+
+// Expressions
+expr = {term ~ (operator ~ term)*}
+  term = {termPiece ~ termSuffix*}
+    termPiece = _{ifTerm | bTrue | bFalse | qualifiedID | real | int | ("(" ~ expr ~ ")")}
+      int = @{("+" | "-")? ~ ASCII_DIGIT+}
+      real = @{int ~ "." ~ ASCII_DIGIT*}
+      bTrue = {"true"}
+      bFalse = {"false"}
+      ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}
+    termSuffix = _{termCall | termPropAccess}
+      termPropAccess = {"." ~ id}
+      termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}
+  operator = _{add | subtract | multiply | divide | eq | ne | lt | le | gt | ge | assign}
+    add = {"+"}
+    subtract = {"-"}
+    multiply = {"*"}
+    divide = {"/"}
+    eq = {"=="}
+    ne = {"!="}
+    lt = {"<"}
+    le = {"<="}
+    gt = {">"}
+    ge = {">="}
+    assign = {"="}
+
+codeBlock = {NEWLINE* ~ (expr ~ NEWLINE+)* ~ expr?}
+
+// Global Definitions
+gTypeDef = {"type" ~ qualifiedID ~ "=" ~ typeDef}
+  typeDef = _{enumDef | wrapDef}
+    enumDef = {"enum" ~ "(" ~ (id ~ ",")* ~ id ~ ","? ~ ")"}
+    wrapDef = {"wrap" ~ qualifiedID}
+
+gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
+  funcSpec = {qualifiedID ~ (("(" ~ ")") | ("(" ~ (funcArg ~ ",")* ~ funcArg ~ ")"))}
+    funcArg = {qualifiedID ~ id}
+
+globalDef = {gTypeDef | gFuncDef}
+
+//program = _{ SOI ~ NEWLINE* ~ (globalDef ~ NEWLINE+)* ~ EOI }
+program = _{ SOI ~ NEWLINE* ~ (globalDef ~ NEWLINE+)* ~ globalDef? ~ EOI }

@@ -1,0 +1,29 @@
+type Celsius = wrap real
+type Fahrenheit = wrap real
+
+type OkOne = wrap int
+
+--type Cycle1 = Cycle2
+--type Cycle2 = Cycle1
+
+def int:op#>(int other) -> bool {
+	true
+}
+
+def main(real a, real y, real xyz, real a, int x) -> void {
+	--a * 100 + y
+
+	--5 + Z:y.x()
+
+	--xyz = a + (59 - 7)
+
+	if x > 5 {
+		5
+	} else {
+		6
+	}
+}
+
+def main2(real x, Celsius y, Celsius y) -> int {
+	1
+}

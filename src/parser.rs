@@ -1,0 +1,528 @@
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
+use symbol::Symbol;
+use crate::ast::*;
+
+lazy_static! {
+	static ref ASSIGN_OP: Symbol = "=".into();
+}
+
+#[derive(Debug)]
+pub enum ParserError {
+	NameAlreadyUsed,
+	TypeIsMissing,
+	TypeIsIncomplete,
+	TypeDependencyCycle,
+	FunctionIsMissing,
+	NoMatchingOverload,
+	DuplicateOverload,
+	TypeMismatch,
+	InvalidAssignTarget,
+	InvalidCall,
+	BadIfConditionType,
+	VariableNotFound,
+	MissingNamespace
+}
+pub type Result<T> = std::result::Result<T, ParserError>;
+
+pub enum PrimitiveType {
+	Void, Bool, Int, Real
+}
+
+pub type TypePtr = Rc<RefCell<Type>>;
+pub enum TypeBody {
+	Incomplete,
+	Primitive(PrimitiveType),
+	Wrapper(TypePtr)
+}
+pub struct Type {
+	name: QualID,
+	body: TypeBody
+}
+
+impl Type {
+	fn ensure_complete(&self) -> Result<()> {
+		if let TypeBody::Incomplete = self.body {
+			Err(ParserError::TypeIsIncomplete)
+		} else {
+			Ok(())
+		}
+	}
+
+	fn equal(a: &TypePtr, b: &TypePtr) -> bool {
+		a.borrow().name == b.borrow().name
+	}
+	fn err_if_not_equal(a: &TypePtr, b: &TypePtr, err: ParserError) -> Result<()> {
+		if Type::equal(a, b) {
+			Ok(())
+		} else {
+			Err(err)
+		}
+	}
+	fn ensure_equal(a: &TypePtr, b: &TypePtr) -> Result<()> {
+		println!("comparing {:?} and {:?}", a.borrow().name, b.borrow().name);
+		Type::err_if_not_equal(a, b, ParserError::TypeMismatch)
+	}
+}
+
+pub type FunctionPtr = Rc<RefCell<Function>>;
+pub enum FunctionBody {
+	Incomplete(usize),
+	BuiltIn,
+	Expr(Expr)
+}
+pub struct Function {
+	arguments: Vec<(TypePtr, Symbol)>,
+	return_type: TypePtr,
+	body: FunctionBody
+}
+
+impl Function {
+	fn matches_types(&self, types: &[TypePtr]) -> bool {
+		(self.arguments.len() == types.len()) &&
+		types.iter().zip(self.arguments.iter()).all(|(check, (arg, _))| Type::equal(&check, &arg))
+	}
+
+	fn matches_arguments(&self, args: &[(TypePtr, Symbol)]) -> bool {
+		(self.arguments.len() == args.len()) &&
+		args.iter().zip(self.arguments.iter()).all(|((check, _), (arg, _))| Type::equal(&check, &arg))
+	}
+}
+
+enum NodeData {
+	Nothing,
+	Function(Vec<FunctionPtr>),
+	Type(TypePtr)
+}
+
+struct Node {
+	children: HashMap<Symbol, Node>,
+	what: NodeData
+}
+
+impl Node {
+	fn new() -> Node {
+		Node {
+			children: HashMap::new(),
+			what: NodeData::Nothing
+		}
+	}
+	fn from_type(typ: TypePtr) -> Node {
+		Node {
+			children: HashMap::new(),
+			what: NodeData::Type(typ)
+		}
+	}
+	fn from_function(func: FunctionPtr) -> Node {
+		Node {
+			children: HashMap::new(),
+			what: NodeData::Function(vec![func])
+		}
+	}
+
+	fn get_function_group(&self) -> Option<&[FunctionPtr]> {
+		if let NodeData::Function(p) = &self.what { Some(p) } else { None }
+	}
+
+	fn get_function_group_mut(&mut self) -> Option<&mut Vec<FunctionPtr>> {
+		if let NodeData::Function(p) = &mut self.what { Some(p) } else { None }
+	}
+
+	fn get_type(&self) -> Option<TypePtr> {
+		if let NodeData::Type(t) = &self.what { Some(t.clone()) } else { None }
+	}
+
+	fn resolve(&self, name: &[Symbol]) -> Option<&Node> {
+		match name.len() {
+			0 => Some(self),
+			1 => self.children.get(name.first().unwrap()),
+			_ => {
+				let (name, next) = name.split_first().unwrap();
+				self.children.get(name)?.resolve(next)
+			}
+		}
+	}
+
+	fn resolve_mut(&mut self, name: &[Symbol]) -> Option<&mut Node> {
+		match name.len() {
+			0 => Some(self),
+			1 => self.children.get_mut(name.first().unwrap()),
+			_ => {
+				let (name, next) = name.split_first().unwrap();
+				self.children.get_mut(name)?.resolve_mut(next)
+			}
+		}
+	}
+
+	fn resolve_type(&self, name: &[Symbol]) -> Option<TypePtr> {
+		self.resolve(name)?.get_type()
+	}
+
+	fn require_type(&self, name: &[Symbol]) -> Result<TypePtr> {
+		self.resolve_type(name).ok_or(ParserError::TypeIsMissing)
+	}
+
+	fn resolve_function_group(&self, name: &[Symbol]) -> Option<&[FunctionPtr]> {
+		self.resolve(name)?.get_function_group()
+	}
+
+	fn resolve_incomplete_function(&self, name: &[Symbol], index: usize) -> Option<FunctionPtr> {
+		let group = self.resolve_function_group(name)?;
+		for func in group {
+			if let FunctionBody::Incomplete(i) = func.borrow().body {
+				if i == index {
+					return Some(func.clone());
+				}
+			}
+		}
+		None
+	}
+
+	fn require_compatible_function(&self, name: &[Symbol], args: &[TypePtr]) -> Result<FunctionPtr> {
+		let group = self.resolve_function_group(name);
+		let group = group.ok_or(ParserError::FunctionIsMissing)?;
+		for func in group {
+			if func.borrow().matches_types(args) {
+				return Ok(func.clone());
+			}
+		}
+		Err(ParserError::NoMatchingOverload)
+	}
+}
+
+struct ParseContext {
+	void_type: TypePtr,
+	bool_type: TypePtr,
+	int_type: TypePtr,
+	real_type: TypePtr,
+	root: Node
+}
+
+impl Type {
+	fn from_primitive(name: &str, ptyp: PrimitiveType) -> TypePtr {
+		Type::from_body(vec![name.into()], TypeBody::Primitive(ptyp))
+	}
+
+	fn from_body(name: QualID, body: TypeBody) -> TypePtr {
+		Rc::new(RefCell::new(Type { name, body }))
+	}
+}
+
+impl ParseContext {
+	fn new() -> ParseContext {
+		use PrimitiveType::*;
+		let mut ctx = ParseContext {
+			void_type: Type::from_primitive("void", Void),
+			bool_type: Type::from_primitive("bool", Bool),
+			int_type: Type::from_primitive("int", Int),
+			real_type: Type::from_primitive("real", Real),
+			root: Node::new()
+		};
+		ctx.add_default_types();
+		ctx
+	}
+
+	fn add_default_types(&mut self) {
+		self.add_type(self.void_type.clone()).unwrap();
+		self.add_type(self.bool_type.clone()).unwrap();
+		self.add_type(self.int_type.clone()).unwrap();
+		self.add_type(self.real_type.clone()).unwrap();
+	}
+
+	fn add_type(&mut self, typ: TypePtr) -> Result<()> {
+		let node = Node::from_type(typ.clone());
+		let typ = typ.borrow();
+		let (name, container) = typ.name.split_last().unwrap();
+		let container = self.root.resolve_mut(container).ok_or(ParserError::MissingNamespace)?;
+		if container.children.contains_key(&name) {
+			Err(ParserError::NameAlreadyUsed)
+		} else {
+			container.children.insert(*name, node);
+			Ok(())
+		}
+	}
+
+	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &TypeDef) -> Result<()> {
+		let typ = self.root.resolve_type(name).expect("replacing non-existent incomplete type");
+
+		match typedef {
+			TypeDef::Wrap(target_ref) => {
+				let target_type = self.root.require_type(target_ref)?;
+				target_type.borrow().ensure_complete()?;
+				typ.borrow_mut().body = TypeBody::Wrapper(target_type.clone());
+				Ok(())
+			}
+			TypeDef::Enum(ids) => unreachable!()
+		}
+	}
+
+	fn collect_types(&mut self, prog: &Program) -> Result<()> {
+		let mut typedefs: Vec<&GlobalDef> = vec![];
+
+		for def in prog {
+			if let GlobalDef::Type(name, _) = def {
+				self.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
+				typedefs.push(&def);
+			}
+		}
+
+		// This may require multiple passes, and cycles may occur,
+		// so we must detect those and return an error
+		while !typedefs.is_empty() {
+			let mut leftovers: Vec<&GlobalDef> = vec![];
+			let mut processed = 0;
+
+			for def in &typedefs {
+				let result = match def {
+					GlobalDef::Type(name, def) => self.replace_incomplete_type(&name, &def),
+					_ => unreachable!()
+				};
+
+				match result {
+					Ok(()) => processed += 1,
+					Err(ParserError::TypeIsIncomplete) => leftovers.push(def),
+					_ => return result
+				}
+			}
+
+			if processed == 0 {
+				// we have reached a cycle
+				return Err(ParserError::TypeDependencyCycle);
+			} else {
+				typedefs = leftovers;
+			}
+		}
+
+		Ok(())
+	}
+
+	fn add_function(&mut self, name: &[Symbol], func: Function) -> Result<()> {
+		let (name, container) = name.split_last().unwrap();
+		let container = self.root.resolve_mut(container).ok_or(ParserError::MissingNamespace)?;
+		let fptr = Rc::new(RefCell::new(func));
+		if let Some(existing) = container.children.get_mut(&name) {
+			// add to the existing function?
+			let group = existing.get_function_group().ok_or(ParserError::NameAlreadyUsed)?;
+			if group.iter().any(|c| c.borrow().matches_arguments(&fptr.borrow().arguments)) {
+				Err(ParserError::DuplicateOverload)
+			} else {
+				existing.get_function_group_mut().unwrap().push(fptr);
+				Ok(())
+			}
+		} else {
+			container.children.insert(*name, Node::from_function(fptr));
+			Ok(())
+		}
+	}
+
+	fn collect_function_specs(&mut self, prog: &Program) -> Result<()> {
+		for (i, def) in prog.iter().enumerate() {
+			if let GlobalDef::Func(name, args, return_type, _) = def {
+				let processed_args: Result<Vec<(TypePtr, Symbol)>> = args.iter().map(
+					|(tref, arg_id)|
+					self.root.require_type(tref).map(|t| (t, arg_id.clone()))
+				).collect();
+
+				let func = Function {
+					arguments: processed_args?,
+					return_type: self.root.require_type(return_type)?,
+					body: FunctionBody::Incomplete(i)
+				};
+				self.add_function(name, func)?;
+			}
+		}
+
+		Ok(())
+	}
+
+	fn collect_function_bodies(&mut self, prog: &Program) -> Result<()> {
+		for (i, def) in prog.iter().enumerate() {
+			if let GlobalDef::Func(name, args, _, hlexpr) = def {
+				let func = self.root.resolve_incomplete_function(name, i).expect("filling body for non-existent function");
+
+				println!("SUGARED EXPRESSION: {:?}", hlexpr);
+				let expr = desugar_expr(hlexpr)?;
+				println!("DESUGARED EXPRESSION: {:?}", expr);
+				self.check_function(&func.borrow(), &expr)?;
+				func.borrow_mut().body = FunctionBody::Expr(expr);
+			}
+		}
+
+		Ok(())
+	}
+
+
+	fn check_function(&mut self, func: &Function, expr: &Expr) -> Result<()> {
+		let mut ctx = CodeParseContext::new(self, &func.arguments);
+		let result_type = ctx.typecheck_expr(expr)?;
+
+		// any final result is ok if the function returns void
+		if !Type::equal(&func.return_type, &self.void_type) {
+			Type::ensure_equal(&result_type, &func.return_type)?;
+		}
+		Ok(())
+	}
+}
+
+
+fn desugar_expr(expr: &HLExpr) -> Result<Expr> {
+	match expr {
+		HLExpr::ID(syms) => {
+			// currently, this should only work for local vars
+			if syms.len() == 1 {
+				let var = syms.first().unwrap().clone();
+				Ok(Expr::LocalGet(var))
+			} else {
+				Err(ParserError::VariableNotFound)
+			}
+		}
+		HLExpr::Binary(lhs, op, rhs) if *op == *ASSIGN_OP => {
+			match lhs {
+				box HLExpr::ID(syms) if syms.len() == 1 => {
+					// Assign to local
+					let var   = syms.first().unwrap().clone();
+					let value = Box::new(desugar_expr(&*rhs)?);
+					Ok(Expr::LocalSet(var, value))
+				}
+				box HLExpr::PropAccess(obj, sym) => {
+					// Set property
+					let obj   = Box::new(desugar_expr(&*obj)?);
+					let sym   = (sym.as_str().to_string() + "=").into();
+					let value = desugar_expr(&*rhs)?;
+					Ok(Expr::MethodCall(obj, sym, vec![value]))
+				}
+				_ => Err(ParserError::InvalidAssignTarget)
+			}
+		}
+		HLExpr::Binary(lhs, op, rhs) => {
+			// Binary op becomes a method call
+			let lhs = Box::new(desugar_expr(&*lhs)?);
+			let sym = ("op#".to_string() + op).into();
+			let rhs = desugar_expr(&*rhs)?;
+			Ok(Expr::MethodCall(lhs, sym, vec![rhs]))
+		}
+		HLExpr::PropAccess(obj, sym) => {
+			// Naked PropAccess maps to an argument-less method call
+			let obj = Box::new(desugar_expr(&*obj)?);
+			Ok(Expr::MethodCall(obj, *sym, vec![]))
+		}
+		HLExpr::Call(box HLExpr::PropAccess(obj, sym), args) => {
+			// Call on a property becomes a method call
+			let obj  = Box::new(desugar_expr(&*obj)?);
+			let args = args.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
+			Ok(Expr::MethodCall(obj, *sym, args))
+		}
+		HLExpr::Call(box HLExpr::ID(qid), args) => {
+			// Call on a qualified ID becomes a function call
+			let args = args.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
+			Ok(Expr::FunctionCall(qid.clone(), args))
+		}
+		HLExpr::Call(_, _) => Err(ParserError::InvalidCall),
+		HLExpr::If(cond, if_true, if_false) => {
+			let cond     = Box::new(desugar_expr(&*cond)?);
+			let if_true  = Box::new(desugar_expr(&*if_true)?);
+			let if_false = match if_false {
+				None        => None,
+				Some(box e) => Some(Box::new(desugar_expr(e)?))
+			};
+			Ok(Expr::If(cond, if_true, if_false))
+		}
+		HLExpr::CodeBlock(exprs) => {
+			let exprs = exprs.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
+			Ok(Expr::CodeBlock(exprs))
+		}
+		HLExpr::Int(result)  => Ok(Expr::Int(result.clone())),
+		HLExpr::Real(result) => Ok(Expr::Real(result.clone())),
+		HLExpr::Bool(value)  => Ok(Expr::Bool(*value))
+	}
+}
+
+
+struct CodeParseContext<'a> {
+	parent: &'a ParseContext,
+	locals: Vec<(TypePtr, Symbol)>
+}
+
+impl<'a> CodeParseContext<'a> {
+	fn new(parent_ctx: &'a ParseContext, locals: &Vec<(TypePtr, Symbol)>) -> CodeParseContext<'a> {
+		CodeParseContext {
+			parent: parent_ctx,
+			locals: locals.clone()
+		}
+	}
+
+	fn resolve_local_var(&mut self, sym: &Symbol) -> Result<(usize, TypePtr)> {
+		for (i, (var_type, var_name)) in self.locals.iter().enumerate().rev() {
+			if sym == var_name {
+				return Ok((i, var_type.clone()));
+			}
+		}
+		Err(ParserError::VariableNotFound)
+	}
+
+	fn typecheck_expr(&mut self, expr: &Expr) -> Result<TypePtr> {
+		use Expr::*;
+		match expr {
+			LocalGet(sym) => Ok(self.resolve_local_var(sym)?.1),
+			LocalSet(sym, value) => {
+				let (_, var_type) = self.resolve_local_var(sym)?;
+				let value_type = self.typecheck_expr(value)?;
+				Type::ensure_equal(&var_type, &value_type)?;
+				Ok(value_type)
+			}
+			FunctionCall(qid, args) => {
+				// TODO resolve overloads
+				let arg_types = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<TypePtr>>>()?;
+				unreachable!()
+			}
+			MethodCall(obj, sym, args) => {
+				// TODO resolve overloads
+				let obj_type = self.typecheck_expr(obj)?;
+				let arg_types = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<TypePtr>>>()?;
+				let type_node = self.parent.root.resolve(&obj_type.borrow().name).expect("type missing");
+				let method = type_node.require_compatible_function(&[*sym], &arg_types)?;
+				let return_type = method.borrow().return_type.clone();
+				Ok(return_type)
+			}
+			If(cond, if_true, if_false) => {
+				let cond_type = self.typecheck_expr(cond)?;
+				Type::err_if_not_equal(&cond_type, &self.parent.bool_type, ParserError::BadIfConditionType)?;
+				let if_true_type = self.typecheck_expr(if_true)?;
+				match if_false {
+					None => {
+						// Without a False, this always returns void
+						Ok(self.parent.void_type.clone())
+					}
+					Some(e) => {
+						let if_false_type = self.typecheck_expr(e)?;
+						if Type::equal(&if_true_type, &if_false_type) {
+							Ok(if_true_type)
+						} else {
+							// If both branches have differing return types, return void
+							Ok(self.parent.void_type.clone())
+						}
+					}
+				}
+			}
+			CodeBlock(exprs) => {
+				let mut result_type = self.parent.void_type.clone();
+				for sub_expr in exprs {
+					result_type = self.typecheck_expr(sub_expr)?.clone();
+				}
+				Ok(result_type)
+			}
+			Int(_) => Ok(self.parent.int_type.clone()),
+			Real(_) => Ok(self.parent.real_type.clone()),
+			Bool(_) => Ok(self.parent.bool_type.clone())
+		}
+	}
+}
+
+
+pub fn magic(prog: &Program) {
+	let mut ctx = ParseContext::new();
+	ctx.collect_types(prog).expect("Yep");
+	ctx.collect_function_specs(prog).expect("Yep");
+	ctx.collect_function_bodies(prog).expect("Yep");
+}
