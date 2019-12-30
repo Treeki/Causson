@@ -4,7 +4,7 @@ pub type ParseResult<T> = Result<T, <T as FromStr>::Err>;
 
 pub type QualID = Vec<Symbol>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum HLExpr {
 	ID(QualID),
 	Binary(Box<HLExpr>, Symbol, Box<HLExpr>),
@@ -18,7 +18,7 @@ pub enum HLExpr {
 	Bool(bool)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expr {
 	LocalGet(Symbol),
 	LocalSet(Symbol, Box<Expr>),
@@ -34,7 +34,7 @@ pub enum Expr {
 }
 
 // A definition for a new type
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TypeDef {
 	Enum(Vec<Symbol>),
 	Wrap(QualID)
@@ -42,17 +42,16 @@ pub enum TypeDef {
 
 pub type FuncArg = (QualID, Symbol);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum FuncType {
 	Function,
 	Method
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum GlobalDef {
 	Type(QualID, TypeDef),
 	Func(QualID, FuncType, Vec<FuncArg>, QualID, HLExpr)
 }
 
 pub type Program = Vec<GlobalDef>;
-
