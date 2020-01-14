@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::cell::{Ref, RefMut, RefCell};
 use symbol::Symbol;
 use crate::ast::*;
 
@@ -8,7 +8,7 @@ lazy_static! {
 	static ref ASSIGN_OP: Symbol = "=".into();
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParserError {
 	NameAlreadyUsed,
 	TypeIsMissing,
@@ -27,23 +27,38 @@ pub enum ParserError {
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
 	Void, Bool, Int, Real
 }
 
-pub type TypePtr = Rc<RefCell<Type>>;
+#[derive(Debug, Clone)]
+pub struct TypePtr(Rc<RefCell<TypeData>>);
+
+impl PartialEq for TypePtr {
+	fn eq(&self, other: &TypePtr) -> bool {
+		std::rc::Rc::ptr_eq(&self.0, &other.0)
+	}
+}
+impl TypePtr {
+	fn borrow(&self) -> Ref<TypeData> { self.0.borrow() }
+	fn borrow_mut(&mut self) -> RefMut<TypeData> { self.0.borrow_mut() }
+}
+
+#[derive(Debug)]
 pub enum TypeBody {
 	Incomplete,
 	Enum,
 	Primitive(PrimitiveType),
 	Wrapper(TypePtr)
 }
-pub struct Type {
+#[derive(Debug)]
+pub struct TypeData {
 	name: QualID,
 	body: TypeBody
 }
 
-impl Type {
+impl TypeData {
 	fn ensure_complete(&self) -> Result<()> {
 		if let TypeBody::Incomplete = self.body {
 			Err(ParserError::TypeIsIncomplete)
@@ -52,26 +67,23 @@ impl Type {
 		}
 	}
 
-	fn equal(a: &TypePtr, b: &TypePtr) -> bool {
-		a.borrow().name == b.borrow().name
-	}
 	fn err_if_equal(a: &TypePtr, b: &TypePtr, err: ParserError) -> Result<()> {
-		if Type::equal(a, b) {
+		if a == b {
 			Err(err)
 		} else {
 			Ok(())
 		}
 	}
 	fn err_if_not_equal(a: &TypePtr, b: &TypePtr, err: ParserError) -> Result<()> {
-		if Type::equal(a, b) {
+		if a == b {
 			Ok(())
 		} else {
 			Err(err)
 		}
 	}
 	fn ensure_equal(a: &TypePtr, b: &TypePtr) -> Result<()> {
-		println!("comparing {:?} and {:?}", a.borrow().name, b.borrow().name);
-		Type::err_if_not_equal(a, b, ParserError::TypeMismatch)
+		println!("comparing {:?} and {:?}", a.0.borrow().name, b.0.borrow().name);
+		TypeData::err_if_not_equal(a, b, ParserError::TypeMismatch)
 	}
 }
 
@@ -92,12 +104,12 @@ pub struct Function {
 impl Function {
 	fn matches_types(&self, types: &[TypePtr]) -> bool {
 		(self.arguments.len() == types.len()) &&
-		types.iter().zip(self.arguments.iter()).all(|(check, (arg, _))| Type::equal(&check, &arg))
+		types.iter().zip(self.arguments.iter()).all(|(check, (arg, _))| check == arg)
 	}
 
 	fn matches_arguments(&self, args: &[(TypePtr, Symbol)]) -> bool {
 		(self.arguments.len() == args.len()) &&
-		args.iter().zip(self.arguments.iter()).all(|((check, _), (arg, _))| Type::equal(&check, &arg))
+		args.iter().zip(self.arguments.iter()).all(|((check, _), (arg, _))| check == arg)
 	}
 }
 
@@ -205,13 +217,13 @@ struct ParseContext {
 	root: Node
 }
 
-impl Type {
+impl TypeData {
 	fn from_primitive(name: &str, ptyp: PrimitiveType) -> TypePtr {
-		Type::from_body(vec![name.into()], TypeBody::Primitive(ptyp))
+		TypeData::from_body(vec![name.into()], TypeBody::Primitive(ptyp))
 	}
 
 	fn from_body(name: QualID, body: TypeBody) -> TypePtr {
-		Rc::new(RefCell::new(Type { name, body }))
+		TypePtr(Rc::new(RefCell::new(TypeData { name, body })))
 	}
 }
 
@@ -219,10 +231,10 @@ impl ParseContext {
 	fn new() -> ParseContext {
 		use PrimitiveType::*;
 		let mut ctx = ParseContext {
-			void_type: Type::from_primitive("void", Void),
-			bool_type: Type::from_primitive("bool", Bool),
-			int_type: Type::from_primitive("int", Int),
-			real_type: Type::from_primitive("real", Real),
+			void_type: TypeData::from_primitive("void", Void),
+			bool_type: TypeData::from_primitive("bool", Bool),
+			int_type: TypeData::from_primitive("int", Int),
+			real_type: TypeData::from_primitive("real", Real),
 			root: Node::new(NodeData::Nothing)
 		};
 		ctx.add_default_types();
@@ -251,7 +263,7 @@ impl ParseContext {
 
 	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &TypeDef) -> Result<()> {
 		let node = self.root.resolve_mut(name).expect("incomplete type should exist!");
-		let typ = node.get_type().expect("incomplete type should be a type");
+		let mut typ = node.get_type().expect("incomplete type should be a type");
 
 		match typedef {
 			TypeDef::Wrap(target_ref) => {
@@ -279,7 +291,7 @@ impl ParseContext {
 
 		for def in prog {
 			if let GlobalDef::Type(name, _) = def {
-				self.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
+				self.add_type(TypeData::from_body(name.clone(), TypeBody::Incomplete))?;
 				typedefs.push(&def);
 			}
 		}
@@ -400,8 +412,8 @@ impl ParseContext {
 		let result_type = ctx.typecheck_expr(expr)?;
 
 		// any final result is ok if the function returns void
-		if !Type::equal(&func.return_type, &self.void_type) {
-			Type::ensure_equal(&result_type, &func.return_type)?;
+		if func.return_type != self.void_type {
+			TypeData::ensure_equal(&result_type, &func.return_type)?;
 		}
 		Ok(())
 	}
@@ -551,7 +563,7 @@ impl<'a> CodeParseContext<'a> {
 			}
 			If(cond, if_true, if_false) => {
 				let cond_type = self.typecheck_expr(cond)?;
-				Type::err_if_not_equal(&cond_type, &self.parent.bool_type, ParserError::BadIfConditionType)?;
+				TypeData::err_if_not_equal(&cond_type, &self.parent.bool_type, ParserError::BadIfConditionType)?;
 				let if_true_type = self.typecheck_expr(if_true)?;
 				match if_false {
 					None => {
@@ -560,7 +572,7 @@ impl<'a> CodeParseContext<'a> {
 					}
 					Some(e) => {
 						let if_false_type = self.typecheck_expr(e)?;
-						if Type::equal(&if_true_type, &if_false_type) {
+						if if_true_type == if_false_type {
 							Ok(if_true_type)
 						} else {
 							// If both branches have differing return types, return void
@@ -571,7 +583,7 @@ impl<'a> CodeParseContext<'a> {
 			}
 			Let(sym, value) => {
 				let value_type = self.typecheck_expr(value)?;
-				Type::err_if_equal(&value_type, &self.parent.void_type, ParserError::LocalCannotBeVoid)?;
+				TypeData::err_if_equal(&value_type, &self.parent.void_type, ParserError::LocalCannotBeVoid)?;
 				self.locals.push((value_type.clone(), *sym));
 				Ok(value_type)
 			}
@@ -595,4 +607,152 @@ pub fn magic(prog: &Program) {
 	ctx.collect_types(prog).expect("Yep");
 	ctx.collect_function_specs(prog).expect("Yep");
 	ctx.collect_function_bodies(prog).expect("Yep");
+}
+
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use HLExpr as HL;
+	use Expr::*;
+
+	fn check_desugar_ok(hl: HLExpr, res: Expr) {
+		assert_eq!(desugar_expr(&hl), Ok(res));
+	}
+	fn check_desugar_err(hl: HLExpr, err: ParserError) {
+		assert_eq!(desugar_expr(&hl), Err(err));
+	}
+
+	#[test]
+	fn test_desugar_get() {
+		check_desugar_ok(
+			HL::ID(vec!["foo".into()]),
+			LocalGet("foo".into())
+		);
+
+		check_desugar_ok(
+			HL::ID(vec!["foo".into(), "bar".into()]),
+			GlobalGet(vec!["foo".into(), "bar".into()])
+		);
+	}
+
+	#[test]
+	fn test_desugar_assign_ok() {
+		let hl_int1 = Box::new(HL::Int(Ok(1)));
+		let int1 = Box::new(Int(Ok(1)));
+		let hl_foo = Box::new(HL::ID(vec!["foo".into()]));
+
+		check_desugar_ok(
+			HL::Binary(hl_foo.clone(), "=".into(), hl_int1.clone()),
+			LocalSet("foo".into(), int1.clone())
+		);
+		check_desugar_ok(
+			HL::Binary(Box::new(HL::PropAccess(hl_foo.clone(), "bar".into())), "=".into(), hl_int1.clone()),
+			MethodCall(Box::new(LocalGet("foo".into())), "bar=".into(), vec![Int(Ok(1))])
+		);
+	}
+
+	#[test]
+	fn test_desugar_assign_err() {
+		fn check(target: HLExpr) {
+			check_desugar_err(
+				HL::Binary(Box::new(target), "=".into(), Box::new(HL::Int(Ok(1)))),
+				ParserError::InvalidAssignTarget
+			);
+		}
+
+		check(HL::ID(vec!["a".into(), "b".into()]));
+		check(HL::Int(Ok(1)));
+		check(HL::Real(Ok(1.)));
+		check(HL::Bool(true));
+		check(HL::Binary(Box::new(HL::Int(Ok(1))), "+".into(), Box::new(HL::Int(Ok(2)))));
+	}
+
+	#[test]
+	fn test_desugar_calls() {
+		check_desugar_ok(
+			HL::Call(Box::new(HL::ID(vec!["a".into()])), vec![]),
+			FunctionCall(vec!["a".into()], vec![])
+		);
+		check_desugar_ok(
+			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(vec!["a".into()])), "b".into())), vec![]),
+			MethodCall(Box::new(LocalGet("a".into())), "b".into(), vec![])
+		);
+		check_desugar_err(
+			HL::Call(Box::new(HL::Int(Ok(1))), vec![]),
+			ParserError::InvalidCall
+		);
+	}
+
+	#[test]
+	fn test_desugar_if() {
+		check_desugar_ok(
+			HL::If(
+				Box::new(HL::Bool(true)),
+				Box::new(HL::Int(Ok(1))),
+				Some(Box::new(HL::Int(Ok(2))))
+			),
+			If(
+				Box::new(Bool(true)),
+				Box::new(Int(Ok(1))),
+				Some(Box::new(Int(Ok(2))))
+			)
+		);
+	}
+
+	#[test]
+	fn test_desugar_binary_ops() {
+		check_desugar_ok(
+			HL::Binary(Box::new(HL::Int(Ok(1))), "+".into(), Box::new(HL::Int(Ok(2)))),
+			MethodCall(Box::new(Int(Ok(1))), "op#+".into(), vec![Int(Ok(2))])
+		);
+	}
+
+
+
+	#[test]
+	fn test_typed_constants() {
+		let pc = ParseContext::new();
+		let func = Function {
+			name: vec!["test".into()],
+			is_method: false,
+			arguments: vec![],
+			return_type: pc.void_type.clone(),
+			body: FunctionBody::Incomplete(0)
+		};
+		let mut cpc = CodeParseContext::new(&pc, &func);
+
+		assert_eq!(cpc.typecheck_expr(&Bool(true)), Ok(pc.bool_type.clone()));
+		assert_eq!(cpc.typecheck_expr(&Int(Ok(5))), Ok(pc.int_type.clone()));
+		assert_eq!(cpc.typecheck_expr(&Real(Ok(5.))), Ok(pc.real_type.clone()));
+	}
+
+	#[test]
+	fn test_typed_variables() {
+		let pc = ParseContext::new();
+		let func = Function {
+			name: vec!["test".into()],
+			is_method: false,
+			arguments: vec![(pc.int_type.clone(), "var".into())],
+			return_type: pc.void_type.clone(),
+			body: FunctionBody::Incomplete(0)
+		};
+		let mut cpc = CodeParseContext::new(&pc, &func);
+
+		// Get
+		assert_eq!(
+			cpc.typecheck_expr(&LocalGet("var".into())),
+			Ok(pc.int_type.clone()));
+		assert_eq!(
+			cpc.typecheck_expr(&LocalGet("nevar".into())),
+			Err(ParserError::VariableNotFound));
+
+		// Set
+		assert_eq!(
+			cpc.typecheck_expr(&LocalSet("var".into(), Box::new(Int(Ok(5))))),
+			Ok(pc.int_type.clone()));
+		assert_eq!(
+			cpc.typecheck_expr(&LocalSet("var".into(), Box::new(Bool(false)))),
+			Err(ParserError::TypeMismatch));
+	}
 }

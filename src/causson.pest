@@ -1,4 +1,4 @@
-WHITESPACE = _{" " | "\t"}
+WHITESPACE = _{" " | "\t" | ("\\" ~ NEWLINE)}
 COMMENT = _{"--" ~ (!NEWLINE ~ ANY)*}
 
 id = @{identifierStart ~ identifierChar*}

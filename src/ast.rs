@@ -4,7 +4,7 @@ pub type ParseResult<T> = Result<T, <T as FromStr>::Err>;
 
 pub type QualID = Vec<Symbol>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HLExpr {
 	ID(QualID),
 	Binary(Box<HLExpr>, Symbol, Box<HLExpr>),
@@ -18,7 +18,7 @@ pub enum HLExpr {
 	Bool(bool)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
 	LocalGet(Symbol),
 	LocalSet(Symbol, Box<Expr>),

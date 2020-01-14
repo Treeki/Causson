@@ -198,10 +198,11 @@ mod tests {
 
 	#[test]
 	fn test_whitespace() {
-		pcc("def x() -> void { }").unwrap();
-		pcc("\n\ndef x() -> void { }").unwrap();
-		pcc("def x() -> void { }\n\n").unwrap();
-		pcc("def x() -> void\n{ let x = 1 +\n3 }").unwrap();
+		pcc("def x() -> void { }").expect("singleline function must work");
+		pcc("\n\ndef x() -> void { }").expect("newlines at start must be allowed");
+		pcc("def x() -> void { }\n\n").expect("newlines at end must be allowed");
+		pcc("def x() -> void {\nlet x = 1 +\\\n3\n}").expect("newlines within expressions must be allowed");
+		pcc("def x() -> void\\\n{ let x = 1 +\\\n3 }").expect("newlines within function definitions must be allowed");
 	}
 
 	#[test]
@@ -293,7 +294,7 @@ mod tests {
 
 	fn assert_expr(ecode: &str, expected: HLExpr) {
 		let ecode = String::from("def x() -> void {") + ecode + "}";
-		let c = pcc(&ecode).unwrap();
+		let c = pcc(&ecode).expect(&ecode);
 		assert_eq!(c, vec![GlobalDef::Func(vec!["x".into()], FuncType::Function, vec![], vec!["void".into()], expected)]);
 	}
 
@@ -320,6 +321,9 @@ mod tests {
 	#[test]
 	fn test_binary_op_precedence() {
 		use HLExpr::*;
+		assert_expr("1 * 2 + 3", Binary(Box::new(Binary(box_int(1), "*".into(), box_int(2))), "+".into(), box_int(3)));
+		assert_expr("1 * (2 + 3)", Binary(box_int(1), "*".into(), Box::new(Binary(box_int(2), "+".into(), box_int(3)))));
+
 		assert_expr(
 			"1 * 2 + 3 / 4 - 5 * 6",
 			Binary(
