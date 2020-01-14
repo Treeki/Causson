@@ -36,6 +36,10 @@ pub enum PrimitiveType {
 #[derive(Debug, Clone)]
 pub struct Type(Rc<TypeData>);
 
+impl Deref for Type {
+	type Target = TypeData;
+	fn deref(&self) -> &Self::Target { &self.0 }
+}
 impl PartialEq for Type {
 	fn eq(&self, other: &Type) -> bool {
 		std::rc::Rc::ptr_eq(&self.0, &other.0)
@@ -56,7 +60,6 @@ pub struct TypeData {
 }
 
 impl Type {
-	fn name(&self) -> &QualID { &self.0.name }
 	fn borrow(&self) -> Ref<TypeBody> { self.0.body.borrow() }
 	fn borrow_mut(&mut self) -> RefMut<TypeBody> { self.0.body.borrow_mut() }
 
@@ -262,7 +265,7 @@ impl ParseContext {
 
 	fn add_type(&mut self, typ: Type) -> Result<()> {
 		let node = Node::from_type(typ.clone());
-		let (name, container) = typ.name().split_last().unwrap();
+		let (name, container) = typ.name.split_last().unwrap();
 		let container = self.root.resolve_mut(container).ok_or(ParserError::MissingNamespace)?;
 		if container.children.contains_key(&name) {
 			Err(ParserError::NameAlreadyUsed)
@@ -344,7 +347,7 @@ impl ParseContext {
 		self.add_builtin_fn(typ, true, name, return_type, args)
 	}
 	fn add_builtin_fn(&mut self, typ: &Type, is_method: bool, name: &Symbol, return_type: &Type, args: &[(Type, Symbol)]) -> Result<()> {
-		let mut full_name = typ.name().clone();
+		let mut full_name = typ.name.clone();
 		full_name.push(*name);
 		let func = FunctionData {
 			name: full_name,
@@ -566,7 +569,7 @@ impl<'a> CodeParseContext<'a> {
 			MethodCall(obj, sym, args) => {
 				let obj_type = self.typecheck_expr(obj)?;
 				let arg_types = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Type>>>()?;
-				let type_node = self.parent.root.resolve(&obj_type.name()).expect("type missing");
+				let type_node = self.parent.root.resolve(&obj_type.name).expect("type missing");
 				let method = type_node.require_compatible_function(&[*sym], &arg_types)?;
 				let return_type = method.return_type.clone();
 				Ok(return_type)
