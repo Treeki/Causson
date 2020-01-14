@@ -118,11 +118,11 @@ fn parse_code_block(pair: Pair) -> HLExpr {
 
 
 // Global Definitions
-fn parse_type_def(pair: Pair) -> TypeDef {
+fn parse_type_def(pair: Pair) -> HLTypeDef {
 	match pair.as_rule() {
-		Rule::wrapDef => TypeDef::Wrap(parse_qualified_id(pair.into_inner().next().unwrap())),
+		Rule::wrapDef => HLTypeDef::Wrap(parse_qualified_id(pair.into_inner().next().unwrap())),
 		Rule::enumDef => {
-			TypeDef::Enum(pair.into_inner().map(parse_id).collect())
+			HLTypeDef::Enum(pair.into_inner().map(parse_id).collect())
 		},
 		_ => unreachable!()
 	}
@@ -214,7 +214,7 @@ mod tests {
 				x = 1 + 3 -- * y
 			}").unwrap();
 		assert_eq!(c, vec![
-			GlobalDef::Type(vec!["a".into()], TypeDef::Wrap(vec!["a".into()])),
+			GlobalDef::Type(vec!["a".into()], HLTypeDef::Wrap(vec!["a".into()])),
 			GlobalDef::Func(
 				vec!["a".into()], FuncType::Function, vec![], vec!["void".into()],
 				HLExpr::Binary(
@@ -233,11 +233,11 @@ mod tests {
 		let a_b_qid = vec!["a".into(), "b".into()];
 
 		let c = pcc("type x = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), TypeDef::Wrap(y_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Wrap(y_qid.clone()))]);
 		let c = pcc("type y = wrap a:b").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(y_qid.clone(), TypeDef::Wrap(a_b_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(y_qid.clone(), HLTypeDef::Wrap(a_b_qid.clone()))]);
 		let c = pcc("type a:b = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(a_b_qid.clone(), TypeDef::Wrap(y_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(a_b_qid.clone(), HLTypeDef::Wrap(y_qid.clone()))]);
 	}
 
 	#[test]
@@ -245,7 +245,7 @@ mod tests {
 		let x_qid = vec!["x".into()];
 		let a_b_c_syms = vec!["a".into(), "b".into(), "c".into()];
 		let c = pcc("type x = enum(a,b,c)").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid, TypeDef::Enum(a_b_c_syms))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid, HLTypeDef::Enum(a_b_c_syms))]);
 	}
 
 	#[test]

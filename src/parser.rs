@@ -28,41 +28,7 @@ pub enum ParserError {
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum PrimitiveType {
-	Void, Bool, Int, Real
-}
-
-#[derive(Debug, Clone)]
-pub struct Type(Rc<TypeData>);
-
-impl Deref for Type {
-	type Target = TypeData;
-	fn deref(&self) -> &Self::Target { &self.0 }
-}
-impl PartialEq for Type {
-	fn eq(&self, other: &Type) -> bool {
-		std::rc::Rc::ptr_eq(&self.0, &other.0)
-	}
-}
-
-#[derive(Debug)]
-pub enum TypeBody {
-	Incomplete,
-	Enum,
-	Primitive(PrimitiveType),
-	Wrapper(Type)
-}
-#[derive(Debug)]
-pub struct TypeData {
-	name: QualID,
-	body: RefCell<TypeBody>
-}
-
 impl Type {
-	fn borrow(&self) -> Ref<TypeBody> { self.0.body.borrow() }
-	fn borrow_mut(&mut self) -> RefMut<TypeBody> { self.0.body.borrow_mut() }
-
 	fn ensure_complete(&self) -> Result<()> {
 		if let TypeBody::Incomplete = *self.borrow() {
 			Err(ParserError::TypeIsIncomplete)
@@ -86,7 +52,7 @@ impl Type {
 		}
 	}
 	fn ensure_equal(a: &Type, b: &Type) -> Result<()> {
-		println!("comparing {:?} and {:?}", a.0.name, b.0.name);
+		println!("comparing {:?} and {:?}", a.name, b.name);
 		Type::err_if_not_equal(a, b, ParserError::TypeMismatch)
 	}
 }
@@ -232,24 +198,14 @@ struct ParseContext {
 	root: Node
 }
 
-impl TypeData {
-	fn from_primitive(name: &str, ptyp: PrimitiveType) -> Type {
-		TypeData::from_body(vec![name.into()], TypeBody::Primitive(ptyp))
-	}
-
-	fn from_body(name: QualID, body: TypeBody) -> Type {
-		Type(Rc::new(TypeData { name, body: RefCell::new(body) }))
-	}
-}
-
 impl ParseContext {
 	fn new() -> ParseContext {
 		use PrimitiveType::*;
 		let mut ctx = ParseContext {
-			void_type: TypeData::from_primitive("void", Void),
-			bool_type: TypeData::from_primitive("bool", Bool),
-			int_type: TypeData::from_primitive("int", Int),
-			real_type: TypeData::from_primitive("real", Real),
+			void_type: Type::from_primitive("void", Void),
+			bool_type: Type::from_primitive("bool", Bool),
+			int_type: Type::from_primitive("int", Int),
+			real_type: Type::from_primitive("real", Real),
 			root: Node::new(NodeData::Nothing)
 		};
 		ctx.add_default_types();
@@ -275,12 +231,12 @@ impl ParseContext {
 		}
 	}
 
-	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &TypeDef) -> Result<()> {
+	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &HLTypeDef) -> Result<()> {
 		let node = self.root.resolve_mut(name).expect("incomplete type should exist!");
 		let mut typ = node.get_type().expect("incomplete type should be a type");
 
 		match typedef {
-			TypeDef::Wrap(target_ref) => {
+			HLTypeDef::Wrap(target_ref) => {
 				let target_type = self.root.require_type(target_ref)?;
 				target_type.ensure_complete()?;
 				*typ.borrow_mut() = TypeBody::Wrapper(target_type.clone());
@@ -290,7 +246,7 @@ impl ParseContext {
 
 				Ok(())
 			}
-			TypeDef::Enum(ids) => {
+			HLTypeDef::Enum(ids) => {
 				*typ.borrow_mut() = TypeBody::Enum;
 				for id in ids {
 					node.children.insert(*id, Node::from_symbol_constant(id));
@@ -305,7 +261,7 @@ impl ParseContext {
 
 		for def in prog {
 			if let GlobalDef::Type(name, _) = def {
-				self.add_type(TypeData::from_body(name.clone(), TypeBody::Incomplete))?;
+				self.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
 				typedefs.push(&def);
 			}
 		}
@@ -411,7 +367,7 @@ impl ParseContext {
 				println!("SUGARED EXPRESSION: {:?}", hlexpr);
 				let expr = desugar_expr(hlexpr)?;
 				println!("DESUGARED EXPRESSION: {:?}", expr);
-				self.check_function(&func, &expr)?;
+				let expr = self.check_function(&func, &expr)?;
 				*func.borrow_mut() = FunctionBody::Expr(expr);
 			}
 		}
@@ -420,27 +376,27 @@ impl ParseContext {
 	}
 
 
-	fn check_function(&mut self, func: &FunctionData, expr: &Expr) -> Result<()> {
+	fn check_function(&mut self, func: &FunctionData, expr: &UncheckedExpr) -> Result<Expr> {
 		let mut ctx = CodeParseContext::new(self, func);
-		let result_type = ctx.typecheck_expr(expr)?;
+		let result_expr = ctx.typecheck_expr(expr)?;
 
 		// any final result is ok if the function returns void
 		if func.return_type != self.void_type {
-			Type::ensure_equal(&result_type, &func.return_type)?;
+			Type::ensure_equal(&result_expr.typ, &func.return_type)?;
 		}
-		Ok(())
+		Ok(result_expr)
 	}
 }
 
 
-fn desugar_expr(expr: &HLExpr) -> Result<Expr> {
+fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 	match expr {
 		HLExpr::ID(qid) => {
 			if qid.len() == 1 {
 				let var = qid.first().unwrap().clone();
-				Ok(Expr::LocalGet(var))
+				Ok(UncheckedExpr(ExprKind::LocalGet(var)))
 			} else {
-				Ok(Expr::GlobalGet(qid.clone()))
+				Ok(UncheckedExpr(ExprKind::GlobalGet(qid.clone())))
 			}
 		}
 		HLExpr::Binary(lhs, op, rhs) if *op == *ASSIGN_OP => {
@@ -449,14 +405,14 @@ fn desugar_expr(expr: &HLExpr) -> Result<Expr> {
 					// Assign to local
 					let var   = syms.first().unwrap().clone();
 					let value = Box::new(desugar_expr(&*rhs)?);
-					Ok(Expr::LocalSet(var, value))
+					Ok(UncheckedExpr(ExprKind::LocalSet(var, value)))
 				}
 				box HLExpr::PropAccess(obj, sym) => {
 					// Set property
 					let obj   = Box::new(desugar_expr(&*obj)?);
 					let sym   = (sym.as_str().to_string() + "=").into();
 					let value = desugar_expr(&*rhs)?;
-					Ok(Expr::MethodCall(obj, sym, vec![value]))
+					Ok(UncheckedExpr(ExprKind::MethodCall(obj, sym, vec![value])))
 				}
 				_ => Err(ParserError::InvalidAssignTarget)
 			}
@@ -466,23 +422,23 @@ fn desugar_expr(expr: &HLExpr) -> Result<Expr> {
 			let lhs = Box::new(desugar_expr(&*lhs)?);
 			let sym = ("op#".to_string() + op).into();
 			let rhs = desugar_expr(&*rhs)?;
-			Ok(Expr::MethodCall(lhs, sym, vec![rhs]))
+			Ok(UncheckedExpr(ExprKind::MethodCall(lhs, sym, vec![rhs])))
 		}
 		HLExpr::PropAccess(obj, sym) => {
 			// Naked PropAccess maps to an argument-less method call
 			let obj = Box::new(desugar_expr(&*obj)?);
-			Ok(Expr::MethodCall(obj, *sym, vec![]))
+			Ok(UncheckedExpr(ExprKind::MethodCall(obj, *sym, vec![])))
 		}
 		HLExpr::Call(box HLExpr::PropAccess(obj, sym), args) => {
 			// Call on a property becomes a method call
 			let obj  = Box::new(desugar_expr(&*obj)?);
-			let args = args.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
-			Ok(Expr::MethodCall(obj, *sym, args))
+			let args = args.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
+			Ok(UncheckedExpr(ExprKind::MethodCall(obj, *sym, args)))
 		}
 		HLExpr::Call(box HLExpr::ID(qid), args) => {
 			// Call on a qualified ID becomes a function call
-			let args = args.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
-			Ok(Expr::FunctionCall(qid.clone(), args))
+			let args = args.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
+			Ok(UncheckedExpr(ExprKind::FunctionCall(qid.clone(), args)))
 		}
 		HLExpr::Call(_, _) => Err(ParserError::InvalidCall),
 		HLExpr::If(cond, if_true, if_false) => {
@@ -492,19 +448,19 @@ fn desugar_expr(expr: &HLExpr) -> Result<Expr> {
 				None        => None,
 				Some(box e) => Some(Box::new(desugar_expr(e)?))
 			};
-			Ok(Expr::If(cond, if_true, if_false))
+			Ok(UncheckedExpr(ExprKind::If(cond, if_true, if_false)))
 		}
 		HLExpr::Let(sym, value) => {
 			let value = Box::new(desugar_expr(&*value)?);
-			Ok(Expr::Let(sym.clone(), value))
+			Ok(UncheckedExpr(ExprKind::Let(sym.clone(), value)))
 		}
 		HLExpr::CodeBlock(exprs) => {
-			let exprs = exprs.iter().map(desugar_expr).collect::<Result<Vec<Expr>>>()?;
-			Ok(Expr::CodeBlock(exprs))
+			let exprs = exprs.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
+			Ok(UncheckedExpr(ExprKind::CodeBlock(exprs)))
 		}
-		HLExpr::Int(result)  => Ok(Expr::Int(result.clone())),
-		HLExpr::Real(result) => Ok(Expr::Real(result.clone())),
-		HLExpr::Bool(value)  => Ok(Expr::Bool(*value))
+		HLExpr::Int(result)  => Ok(UncheckedExpr(ExprKind::Int(result.clone()))),
+		HLExpr::Real(result) => Ok(UncheckedExpr(ExprKind::Real(result.clone()))),
+		HLExpr::Bool(value)  => Ok(UncheckedExpr(ExprKind::Bool(*value)))
 	}
 }
 
@@ -538,15 +494,16 @@ impl<'a> CodeParseContext<'a> {
 		Err(ParserError::VariableNotFound)
 	}
 
-	fn typecheck_expr(&mut self, expr: &Expr) -> Result<Type> {
-		use Expr::*;
-		match expr {
-			LocalGet(sym) => Ok(self.resolve_local_var(sym)?.1),
+	fn typecheck_expr(&mut self, expr: &UncheckedExpr) -> Result<Expr> {
+		use ExprKind::*;
+		match &expr.0 {
+			LocalGet(sym) => Ok(Expr { expr: LocalGet(*sym), typ: self.resolve_local_var(sym)?.1 }),
 			LocalSet(sym, value) => {
 				let (_, var_type) = self.resolve_local_var(sym)?;
-				let value_type = self.typecheck_expr(value)?;
-				Type::ensure_equal(&var_type, &value_type)?;
-				Ok(value_type)
+				let value_expr = self.typecheck_expr(value)?;
+				Type::ensure_equal(&var_type, &value_expr.typ)?;
+				let typ = value_expr.typ.clone();
+				Ok(Expr { expr: LocalSet(*sym, Box::new(value_expr)), typ })
 			}
 			GlobalGet(qid) => {
 				// right now this is JUST for enum constants
@@ -555,61 +512,57 @@ impl<'a> CodeParseContext<'a> {
 				let node = node.ok_or(ParserError::MissingNamespace)?;
 				if let Some(Node { what: NodeData::SymbolConstant(_), .. }) = node.children.get(sym) {
 					// this is a valid enum constant
-					Ok(self.parent.root.resolve_type(node_name).unwrap())
+					let typ = self.parent.root.resolve_type(node_name).unwrap();
+					Ok(Expr { expr: GlobalGet(qid.clone()), typ })
 				} else {
 					Err(ParserError::VariableNotFound)
 				}
 			}
 			FunctionCall(qid, args) => {
-				let arg_types = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Type>>>()?;
+				let arg_exprs = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
 				let func = self.parent.root.require_compatible_function(qid, &arg_types)?;
 				let return_type = func.return_type.clone();
-				Ok(return_type)
+				Ok(Expr { expr: FunctionCall(qid.clone(), arg_exprs), typ: return_type })
 			}
 			MethodCall(obj, sym, args) => {
-				let obj_type = self.typecheck_expr(obj)?;
-				let arg_types = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Type>>>()?;
-				let type_node = self.parent.root.resolve(&obj_type.name).expect("type missing");
+				let obj_expr = self.typecheck_expr(obj)?;
+				let arg_exprs = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
+				let type_node = self.parent.root.resolve(&obj_expr.typ.name).expect("type missing");
 				let method = type_node.require_compatible_function(&[*sym], &arg_types)?;
 				let return_type = method.return_type.clone();
-				Ok(return_type)
+				Ok(Expr { expr: MethodCall(Box::new(obj_expr), *sym, arg_exprs), typ: return_type })
 			}
 			If(cond, if_true, if_false) => {
-				let cond_type = self.typecheck_expr(cond)?;
-				Type::err_if_not_equal(&cond_type, &self.parent.bool_type, ParserError::BadIfConditionType)?;
-				let if_true_type = self.typecheck_expr(if_true)?;
-				match if_false {
-					None => {
-						// Without a False, this always returns void
-						Ok(self.parent.void_type.clone())
-					}
-					Some(e) => {
-						let if_false_type = self.typecheck_expr(e)?;
-						if if_true_type == if_false_type {
-							Ok(if_true_type)
-						} else {
-							// If both branches have differing return types, return void
-							Ok(self.parent.void_type.clone())
-						}
-					}
-				}
+				let cond_expr = self.typecheck_expr(cond)?;
+				Type::err_if_not_equal(&cond_expr.typ, &self.parent.bool_type, ParserError::BadIfConditionType)?;
+				let if_true_expr = self.typecheck_expr(if_true)?;
+				let if_false_expr = if_false.as_ref().map(|e| self.typecheck_expr(&e)).transpose()?;
+				let typ = match &if_false_expr {
+					Some(e) if e.typ == if_true_expr.typ => e.typ.clone(),
+					_                                    => self.parent.void_type.clone()
+				};
+				Ok(Expr { expr: If(Box::new(cond_expr), Box::new(if_true_expr), if_false_expr.map(Box::new)), typ })
 			}
 			Let(sym, value) => {
-				let value_type = self.typecheck_expr(value)?;
-				Type::err_if_equal(&value_type, &self.parent.void_type, ParserError::LocalCannotBeVoid)?;
-				self.locals.push((value_type.clone(), *sym));
-				Ok(value_type)
+				let value_expr = self.typecheck_expr(value)?;
+				Type::err_if_equal(&value_expr.typ, &self.parent.void_type, ParserError::LocalCannotBeVoid)?;
+				self.locals.push((value_expr.typ.clone(), *sym));
+				let typ = value_expr.typ.clone();
+				Ok(Expr { expr: Let(*sym, Box::new(value_expr)), typ })
 			}
 			CodeBlock(exprs) => {
-				let mut result_type = self.parent.void_type.clone();
-				for sub_expr in exprs {
-					result_type = self.typecheck_expr(sub_expr)?.clone();
-				}
-				Ok(result_type)
+				let exprs = exprs.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				let final_type = match exprs.last() {
+					Some(e) => e.typ.clone(),
+					None    => self.parent.void_type.clone()
+				};
+				Ok(Expr { expr: CodeBlock(exprs), typ: final_type })
 			}
-			Int(_) => Ok(self.parent.int_type.clone()),
-			Real(_) => Ok(self.parent.real_type.clone()),
-			Bool(_) => Ok(self.parent.bool_type.clone())
+			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: self.parent.int_type.clone() }),
+			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: self.parent.real_type.clone() }),
+			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: self.parent.bool_type.clone() })
 		}
 	}
 }
@@ -627,13 +580,57 @@ pub fn magic(prog: &Program) {
 mod tests {
 	use super::*;
 	use HLExpr as HL;
-	use Expr::*;
+	use ExprKind::*;
 
-	fn check_desugar_ok(hl: HLExpr, res: Expr) {
-		assert_eq!(desugar_expr(&hl), Ok(res));
+	fn expr(e: ExprKind<UncheckedExpr>) -> UncheckedExpr {
+		UncheckedExpr(e)
+	}
+	fn box_expr(e: ExprKind<UncheckedExpr>) -> Box<UncheckedExpr> {
+		Box::new(expr(e))
+	}
+
+	fn exprs_equal(a: &ExprKind<UncheckedExpr>, b: &ExprKind<UncheckedExpr>) -> bool {
+		fn vec_equal(a: &Vec<UncheckedExpr>, b: &Vec<UncheckedExpr>) -> bool {
+			(a.len() == b.len()) && (a.iter().zip(b).all(|(a,b)| exprs_equal(&a.0, &b.0)))
+		}
+
+		if std::mem::discriminant(&a) != std::mem::discriminant(&b) {
+			return false;
+		}
+
+		match (a, b) {
+			(LocalGet(a), LocalGet(b)) => a == b,
+			(LocalSet(a0, a1), LocalSet(b0, b1)) => (a0 == b0) && exprs_equal(&a1.0, &b1.0),
+			(GlobalGet(a), GlobalGet(b)) => a == b,
+			(FunctionCall(a0, a1), FunctionCall(b0, b1)) => {
+				(a0 == b0) && vec_equal(a1, b1)
+			}
+			(MethodCall(a0, a1, a2), MethodCall(b0, b1, b2)) => {
+				exprs_equal(&a0.0, &b0.0) && (a1 == b1) && vec_equal(a2, b2)
+			}
+			(If(a0, a1, a2), If(b0, b1, b2)) => {
+				exprs_equal(&a0.0, &b0.0) && exprs_equal(&a1.0, &b1.0) && match (a2, b2) {
+					(None, None)       => true,
+					(Some(a), Some(b)) => exprs_equal(&a.0, &b.0),
+					_                  => false
+				}
+			}
+			(Let(a0, a1), Let(b0, b1)) => (a0 == b0) && exprs_equal(&a1.0, &b1.0),
+			(CodeBlock(a), CodeBlock(b)) => vec_equal(&a, &b),
+			(Int(a), Int(b)) => a == b,
+			(Real(a), Real(b)) => a == b,
+			(Bool(a), Bool(b)) => a == b,
+			_ => unreachable!()
+		}
+	}
+
+	fn check_desugar_ok(hl: HLExpr, res: ExprKind<UncheckedExpr>) {
+		let expr = desugar_expr(&hl).unwrap();
+		assert!(exprs_equal(&expr.0, &res));
 	}
 	fn check_desugar_err(hl: HLExpr, err: ParserError) {
-		assert_eq!(desugar_expr(&hl), Err(err));
+		let expr = desugar_expr(&hl);
+		assert!(expr.is_err() && expr.unwrap_err() == err);
 	}
 
 	#[test]
@@ -652,7 +649,7 @@ mod tests {
 	#[test]
 	fn test_desugar_assign_ok() {
 		let hl_int1 = Box::new(HL::Int(Ok(1)));
-		let int1 = Box::new(Int(Ok(1)));
+		let int1 = box_expr(Int(Ok(1)));
 		let hl_foo = Box::new(HL::ID(vec!["foo".into()]));
 
 		check_desugar_ok(
@@ -661,7 +658,7 @@ mod tests {
 		);
 		check_desugar_ok(
 			HL::Binary(Box::new(HL::PropAccess(hl_foo.clone(), "bar".into())), "=".into(), hl_int1.clone()),
-			MethodCall(Box::new(LocalGet("foo".into())), "bar=".into(), vec![Int(Ok(1))])
+			MethodCall(box_expr(LocalGet("foo".into())), "bar=".into(), vec![expr(Int(Ok(1)))])
 		);
 	}
 
@@ -689,7 +686,7 @@ mod tests {
 		);
 		check_desugar_ok(
 			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(vec!["a".into()])), "b".into())), vec![]),
-			MethodCall(Box::new(LocalGet("a".into())), "b".into(), vec![])
+			MethodCall(box_expr(LocalGet("a".into())), "b".into(), vec![])
 		);
 		check_desugar_err(
 			HL::Call(Box::new(HL::Int(Ok(1))), vec![]),
@@ -706,9 +703,9 @@ mod tests {
 				Some(Box::new(HL::Int(Ok(2))))
 			),
 			If(
-				Box::new(Bool(true)),
-				Box::new(Int(Ok(1))),
-				Some(Box::new(Int(Ok(2))))
+				box_expr(Bool(true)),
+				box_expr(Int(Ok(1))),
+				Some(box_expr(Int(Ok(2))))
 			)
 		);
 	}
@@ -717,7 +714,7 @@ mod tests {
 	fn test_desugar_binary_ops() {
 		check_desugar_ok(
 			HL::Binary(Box::new(HL::Int(Ok(1))), "+".into(), Box::new(HL::Int(Ok(2)))),
-			MethodCall(Box::new(Int(Ok(1))), "op#+".into(), vec![Int(Ok(2))])
+			MethodCall(box_expr(Int(Ok(1))), "op#+".into(), vec![expr(Int(Ok(2)))])
 		);
 	}
 
@@ -735,9 +732,9 @@ mod tests {
 		};
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
-		assert_eq!(cpc.typecheck_expr(&Bool(true)), Ok(pc.bool_type.clone()));
-		assert_eq!(cpc.typecheck_expr(&Int(Ok(5))), Ok(pc.int_type.clone()));
-		assert_eq!(cpc.typecheck_expr(&Real(Ok(5.))), Ok(pc.real_type.clone()));
+		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, pc.bool_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Int(Ok(5)))).unwrap().typ, pc.int_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Real(Ok(5.)))).unwrap().typ, pc.real_type.clone());
 	}
 
 	#[test]
@@ -753,19 +750,15 @@ mod tests {
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
 		// Get
-		assert_eq!(
-			cpc.typecheck_expr(&LocalGet("var".into())),
-			Ok(pc.int_type.clone()));
-		assert_eq!(
-			cpc.typecheck_expr(&LocalGet("nevar".into())),
-			Err(ParserError::VariableNotFound));
+		let e = cpc.typecheck_expr(&expr(LocalGet("var".into())));
+		assert_eq!(e.unwrap().typ, pc.int_type.clone());
+		let e = cpc.typecheck_expr(&expr(LocalGet("nevar".into())));
+		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound);
 
 		// Set
-		assert_eq!(
-			cpc.typecheck_expr(&LocalSet("var".into(), Box::new(Int(Ok(5))))),
-			Ok(pc.int_type.clone()));
-		assert_eq!(
-			cpc.typecheck_expr(&LocalSet("var".into(), Box::new(Bool(false)))),
-			Err(ParserError::TypeMismatch));
+		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Int(Ok(5))))));
+		assert_eq!(e.unwrap().typ, pc.int_type.clone());
+		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Bool(false)))));
+		assert!(e.is_err() && e.unwrap_err() == ParserError::TypeMismatch);
 	}
 }
