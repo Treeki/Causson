@@ -9,6 +9,7 @@ extern crate symbol;
 
 mod ast;
 mod ast_builder;
+mod eval;
 mod parser;
 
 fn main() {

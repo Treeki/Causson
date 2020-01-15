@@ -166,6 +166,8 @@ impl Function {
 pub enum ExprKind<P: Clone> {
 	LocalGet(Symbol),
 	LocalSet(Symbol, Box<P>),
+	LocalGetResolved(usize),
+	LocalSetResolved(usize, Box<P>),
 	GlobalGet(QualID),
 	FunctionCall(QualID, Vec<P>),
 	MethodCall(Box<P>, Symbol, Vec<P>),
@@ -293,4 +295,43 @@ pub struct SymbolTable {
 	pub int_type: Type,
 	pub real_type: Type,
 	pub root: SymTabNode
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SymTabError {
+	MissingNamespace,
+	NamespaceOrTypeExpected,
+	DuplicateName
+}
+
+impl SymbolTable {
+	pub fn new() -> SymbolTable {
+		use PrimitiveType::*;
+		let mut symtab = SymbolTable {
+			void_type: Type::from_primitive("void", Void),
+			bool_type: Type::from_primitive("bool", Bool),
+			int_type: Type::from_primitive("int", Int),
+			real_type: Type::from_primitive("real", Real),
+			root: SymTabNode::new_namespace()
+		};
+
+		symtab.add_type(symtab.void_type.clone()).unwrap();
+		symtab.add_type(symtab.bool_type.clone()).unwrap();
+		symtab.add_type(symtab.int_type.clone()).unwrap();
+		symtab.add_type(symtab.real_type.clone()).unwrap();
+		symtab
+	}
+
+	pub fn add_type(&mut self, typ: Type) -> Result<(), SymTabError> {
+		let node = SymTabNode::new_type(typ.clone());
+		let (name, container) = typ.name.split_last().unwrap();
+		let container = self.root.resolve_mut(container).ok_or(SymTabError::MissingNamespace)?;
+		let hashmap = container.get_children_mut().ok_or(SymTabError::NamespaceOrTypeExpected)?;
+		if hashmap.contains_key(&name) {
+			Err(SymTabError::DuplicateName)
+		} else {
+			hashmap.insert(*name, node);
+			Ok(())
+		}
+	}
 }

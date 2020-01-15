@@ -7,6 +7,7 @@ lazy_static! {
 
 #[derive(Debug, PartialEq)]
 pub enum ParserError {
+	SymTab(SymTabError),
 	NameAlreadyUsed,
 	TypeIsMissing,
 	TypeIsIncomplete,
@@ -25,6 +26,10 @@ pub enum ParserError {
 	InvalidNamespace
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
+
+impl From<SymTabError> for ParserError {
+	fn from(e: SymTabError) -> ParserError { ParserError::SymTab(e) }
+}
 
 impl Type {
 	fn ensure_complete(&self) -> Result<()> {
@@ -56,48 +61,12 @@ impl Type {
 }
 
 struct ParseContext {
-	// void_type: Type,
-	// bool_type: Type,
-	// int_type: Type,
-	// real_type: Type,
-	// root: Node
 	symtab: SymbolTable
 }
 
 impl ParseContext {
 	fn new() -> ParseContext {
-		use PrimitiveType::*;
-		let mut ctx = ParseContext {
-			symtab: SymbolTable {
-				void_type: Type::from_primitive("void", Void),
-				bool_type: Type::from_primitive("bool", Bool),
-				int_type: Type::from_primitive("int", Int),
-				real_type: Type::from_primitive("real", Real),
-				root: SymTabNode::new_namespace()
-			}
-		};
-		ctx.add_default_types();
-		ctx
-	}
-
-	fn add_default_types(&mut self) {
-		self.add_type(self.symtab.void_type.clone()).unwrap();
-		self.add_type(self.symtab.bool_type.clone()).unwrap();
-		self.add_type(self.symtab.int_type.clone()).unwrap();
-		self.add_type(self.symtab.real_type.clone()).unwrap();
-	}
-
-	fn add_type(&mut self, typ: Type) -> Result<()> {
-		let node = SymTabNode::new_type(typ.clone());
-		let (name, container) = typ.name.split_last().unwrap();
-		let container = self.symtab.root.resolve_mut(container).ok_or(ParserError::MissingNamespace)?;
-		let hashmap = container.get_children_mut().ok_or(ParserError::InvalidNamespace)?;
-		if hashmap.contains_key(&name) {
-			Err(ParserError::NameAlreadyUsed)
-		} else {
-			hashmap.insert(*name, node);
-			Ok(())
-		}
+		ParseContext { symtab: SymbolTable::new() }
 	}
 
 	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &HLTypeDef) -> Result<()> {
@@ -131,7 +100,7 @@ impl ParseContext {
 
 		for def in prog {
 			if let GlobalDef::Type(name, _) = def {
-				self.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
+				self.symtab.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
 				typedefs.push(&def);
 			}
 		}
@@ -368,17 +337,29 @@ impl<'a> CodeParseContext<'a> {
 		Err(ParserError::VariableNotFound)
 	}
 
+	fn scoped_typecheck_expr(&mut self, expr: &UncheckedExpr) -> Result<Expr> {
+		let locals_depth = self.locals.len();
+		let result = self.typecheck_expr(expr);
+		self.locals.truncate(locals_depth);
+		result
+	}
+
 	fn typecheck_expr(&mut self, expr: &UncheckedExpr) -> Result<Expr> {
 		use ExprKind::*;
 		match &expr.0 {
-			LocalGet(sym) => Ok(Expr { expr: LocalGet(*sym), typ: self.resolve_local_var(sym)?.1 }),
+			LocalGet(sym) => {
+				let (id, typ) = self.resolve_local_var(sym)?;
+				Ok(Expr { expr: LocalGetResolved(id), typ })
+			}
 			LocalSet(sym, value) => {
-				let (_, var_type) = self.resolve_local_var(sym)?;
+				let (id, var_type) = self.resolve_local_var(sym)?;
 				let value_expr = self.typecheck_expr(value)?;
 				Type::ensure_equal(&var_type, &value_expr.typ)?;
 				let typ = value_expr.typ.clone();
-				Ok(Expr { expr: LocalSet(*sym, Box::new(value_expr)), typ })
+				Ok(Expr { expr: LocalSetResolved(id, Box::new(value_expr)), typ })
 			}
+			LocalGetResolved(_) => unreachable!(),
+			LocalSetResolved(_, _) => unreachable!(),
 			GlobalGet(qid) => {
 				// right now this is JUST for enum constants
 				let (sym, node_name) = qid.split_last().unwrap();
@@ -391,7 +372,7 @@ impl<'a> CodeParseContext<'a> {
 				Ok(Expr { expr: GlobalGet(qid.clone()), typ })
 			}
 			FunctionCall(qid, args) => {
-				let arg_exprs = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
 				let func = self.parent.symtab.root.resolve(qid).ok_or(ParserError::FunctionIsMissing)?;
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
@@ -401,7 +382,7 @@ impl<'a> CodeParseContext<'a> {
 			}
 			MethodCall(obj, sym, args) => {
 				let obj_expr = self.typecheck_expr(obj)?;
-				let arg_exprs = args.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
 				let type_node = self.parent.symtab.root.resolve(&obj_expr.typ.name).expect("type missing");
 				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
@@ -411,14 +392,17 @@ impl<'a> CodeParseContext<'a> {
 				Ok(Expr { expr: MethodCall(Box::new(obj_expr), *sym, arg_exprs), typ: return_type })
 			}
 			If(cond, if_true, if_false) => {
+				// don't use scoped_typecheck_expr here so the locals carry on into branches
+				let orig_local_depth = self.locals.len();
 				let cond_expr = self.typecheck_expr(cond)?;
 				Type::err_if_not_equal(&cond_expr.typ, &self.parent.symtab.bool_type, ParserError::BadIfConditionType)?;
-				let if_true_expr = self.typecheck_expr(if_true)?;
-				let if_false_expr = if_false.as_ref().map(|e| self.typecheck_expr(&e)).transpose()?;
+				let if_true_expr = self.scoped_typecheck_expr(if_true)?;
+				let if_false_expr = if_false.as_ref().map(|e| self.scoped_typecheck_expr(&e)).transpose()?;
 				let typ = match &if_false_expr {
 					Some(e) if e.typ == if_true_expr.typ => e.typ.clone(),
 					_                                    => self.parent.symtab.void_type.clone()
 				};
+				self.locals.truncate(orig_local_depth);
 				Ok(Expr { expr: If(Box::new(cond_expr), Box::new(if_true_expr), if_false_expr.map(Box::new)), typ })
 			}
 			Let(sym, value) => {
@@ -429,7 +413,9 @@ impl<'a> CodeParseContext<'a> {
 				Ok(Expr { expr: Let(*sym, Box::new(value_expr)), typ })
 			}
 			CodeBlock(exprs) => {
+				let orig_local_depth = self.locals.len();
 				let exprs = exprs.iter().map(|e| self.typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
+				self.locals.truncate(orig_local_depth);
 				let final_type = match exprs.last() {
 					Some(e) => e.typ.clone(),
 					None    => self.parent.symtab.void_type.clone()
