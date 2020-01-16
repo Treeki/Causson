@@ -82,10 +82,8 @@ impl ParseContext {
 					n, &typ, &[(target_type.clone(), "v".into())],
 					move |args| args[0].clone()
 				)?;
-				let mut n = typ.name.clone();
-				n.push("unwrap".into());
 				self.symtab.add_builtin_method(
-					n, &target_type, &[],
+					&typ, "unwrap", &target_type, &[],
 					move |args| args[0].clone()
 				)?;
 

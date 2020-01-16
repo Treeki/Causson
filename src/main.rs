@@ -11,6 +11,7 @@ mod ast;
 mod ast_builder;
 mod eval;
 mod parser;
+mod stdlib;
 
 fn main() {
     let code = std::fs::read_to_string("sample/temperature.causson").unwrap();

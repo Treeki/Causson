@@ -342,15 +342,7 @@ impl SymbolTable {
 		symtab.add_type(symtab.int_type.clone()).unwrap();
 		symtab.add_type(symtab.real_type.clone()).unwrap();
 
-		symtab.add_builtin_method(
-			vec!["real".into(), "op#+".into()], &symtab.real_type.clone(), &[(symtab.real_type.clone(), "v".into())],
-			move |args| Value::Real(args[0].unchecked_real() + args[1].unchecked_real())
-		).unwrap();
-
-		symtab.add_builtin_function(
-			vec!["test_builtin_function".into()], &symtab.int_type.clone(), &[],
-			move |_| Value::Int(100)
-		).unwrap();
+		crate::stdlib::inject(&mut symtab).expect("standard library injection failed");
 
 		symtab
 	}
@@ -373,9 +365,12 @@ impl SymbolTable {
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
-	pub fn add_builtin_method<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&[Value]) -> Value + 'static
 	{
+		let mut qid = Vec::with_capacity(typ.name.len() + 1);
+		for n in &typ.name { qid.push(*n) }
+		qid.push(name.into());
 		self.add_builtin_fn(true, qid, return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
