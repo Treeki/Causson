@@ -52,7 +52,16 @@ impl EvalContext<'_> {
 			}
 			MethodCall(obj_expr, sym, arg_exprs) => {
 				// dynamic dispatch will go here eventually
-				unreachable!()
+				// low-hanging optimisation fruit here...
+				let obj = self.eval(&obj_expr);
+				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
+				let type_node = self.symtab.root.resolve(&obj_expr.typ.name).unwrap();
+				let method_node = type_node.resolve(&[*sym]).unwrap();
+				let variants = method_node.get_function_variants().unwrap();
+				let func = variants.iter().find(|f| f.matches_types(&arg_types)).unwrap();
+				let mut args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
+				args.insert(0, obj);
+				self.eval_func(func, args)
 			}
 			If(cond_expr, if_true_expr, if_false_expr) => {
 				let orig_local_depth = self.locals.len();

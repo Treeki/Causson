@@ -5,7 +5,7 @@ type Fahrenheit = wrap real
 
 -- these need to be built-in
 -- but are just here to satisfy the type checker right now
-def real:op#+(real v) -> real { 0. }
+-- def real:op#+(real v) -> real { 0. }
 def real:op#-(real v) -> real { 0. }
 def real:op#*(real v) -> real { 0. }
 def real:op#/(real v) -> real { 0. }
@@ -32,6 +32,6 @@ def Celsius:toState(self) -> WeatherState {
 	}
 }
 
-def main() -> int {
-	test_builtin_function()
+def main() -> real {
+	5. + 8.
 }

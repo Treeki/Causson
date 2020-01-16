@@ -342,6 +342,11 @@ impl SymbolTable {
 		symtab.add_type(symtab.int_type.clone()).unwrap();
 		symtab.add_type(symtab.real_type.clone()).unwrap();
 
+		symtab.add_builtin_method(
+			vec!["real".into(), "op#+".into()], &symtab.real_type.clone(), &[(symtab.real_type.clone(), "v".into())],
+			move |args| Value::Real(args[0].unchecked_real() + args[1].unchecked_real())
+		).unwrap();
+
 		symtab.add_builtin_function(
 			vec!["test_builtin_function".into()], &symtab.int_type.clone(), &[],
 			move |_| Value::Int(100)
@@ -412,5 +417,14 @@ pub enum Value {
 	Int(i64),
 	Real(f64),
 	Enum(Symbol)
+}
+
+impl Value {
+	pub fn unchecked_real(&self) -> f64 {
+		match self {
+			Value::Real(v) => *v,
+			_ => panic!("Real value expected")
+		}
+	}
 }
 
