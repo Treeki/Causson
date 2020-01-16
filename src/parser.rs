@@ -378,8 +378,9 @@ impl<'a> CodeParseContext<'a> {
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
 				let func = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = func.return_type.clone();
-				Ok(Expr { expr: FunctionCall(qid.clone(), arg_exprs), typ: return_type })
+				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_exprs), typ: return_type })
 			}
+			FunctionCallResolved(_, _) => unreachable!(),
 			MethodCall(obj, sym, args) => {
 				let obj_expr = self.typecheck_expr(obj)?;
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;

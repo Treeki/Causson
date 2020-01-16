@@ -34,14 +34,41 @@ impl EvalContext<'_> {
 			GlobalGet(qid) => {
 				unreachable!()
 			}
-			FunctionCall(qid, arg_exprs) => {
-				unreachable!()
+			FunctionCall(_, _) => unreachable!(),
+			FunctionCallResolved(func, arg_exprs) => {
+				let args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
+				match &*func.borrow() {
+					FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
+					FunctionBody::Expr(sub_expr) => {
+						let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
+						sub_ctx.eval(&sub_expr)
+					}
+					FunctionBody::BuiltIn => unreachable!()
+				}
 			}
 			MethodCall(obj_expr, sym, arg_exprs) => {
+				// dynamic dispatch will go here eventually
 				unreachable!()
 			}
 			If(cond_expr, if_true_expr, if_false_expr) => {
-				unreachable!()
+				let orig_local_depth = self.locals.len();
+				let cond = self.eval(&cond_expr);
+				if let Value::Bool(cond) = cond {
+					if cond {
+						let value = self.eval(&if_true_expr);
+						self.locals.truncate(orig_local_depth);
+						if expr.typ == self.symtab.void_type { Value::Void } else { value }
+					} else if if_false_expr.is_some() {
+						let value = self.eval(&if_false_expr.as_ref().unwrap());
+						self.locals.truncate(orig_local_depth);
+						if expr.typ == self.symtab.void_type { Value::Void } else { value }
+					} else {
+						self.locals.truncate(orig_local_depth);
+						Value::Void
+					}
+				} else {
+					unreachable!("if condition is expected to be a boolean")
+				}
 			}
 			Let(_sym, sub_expr) => {
 				let value = self.eval(&sub_expr);
@@ -118,5 +145,76 @@ mod tests {
 		assert_eq!(result, Value::Int(10));
 
 		assert_eq!(ctx.locals.len(), 0);
+	}
+
+	#[test]
+	fn test_if() {
+		let symtab = SymbolTable::new();
+		let locals = vec![Value::Bool(true), Value::Int(0), Value::Real(0.0)];
+		let mut ctx = EvalContext { symtab: &symtab, locals };
+
+		// test return of the if block
+		let if_same_type = expr(If(
+			box_expr(LocalGetResolved(0), &symtab.bool_type),
+			box_expr(Int(Ok(1)), &symtab.int_type),
+			Some(box_expr(Int(Ok(0)), &symtab.int_type))
+		), &symtab.int_type);
+		ctx.locals[0] = Value::Bool(true);
+		assert_eq!(ctx.eval(&if_same_type), Value::Int(1));
+		ctx.locals[0] = Value::Bool(false);
+		assert_eq!(ctx.eval(&if_same_type), Value::Int(0));
+
+		// test actions and return when both sides are different types
+		let if_diff_type = expr(If(
+			box_expr(LocalGetResolved(0), &symtab.bool_type),
+			box_expr(LocalSetResolved(1, box_expr(Int(Ok(1)), &symtab.int_type)), &symtab.int_type),
+			Some(box_expr(LocalSetResolved(2, box_expr(Real(Ok(1.0)), &symtab.real_type)), &symtab.real_type))
+		), &symtab.void_type);
+
+		ctx.locals[0] = Value::Bool(true);
+		assert_eq!(ctx.locals[1], Value::Int(0));
+		assert_eq!(ctx.locals[2], Value::Real(0.0));
+		assert_eq!(ctx.eval(&if_diff_type), Value::Void);
+		assert_eq!(ctx.locals[1], Value::Int(1));
+		assert_eq!(ctx.locals[2], Value::Real(0.0));
+
+		ctx.locals[0] = Value::Bool(false);
+		ctx.locals[1] = Value::Int(0);
+		assert_eq!(ctx.locals[1], Value::Int(0));
+		assert_eq!(ctx.locals[2], Value::Real(0.0));
+		assert_eq!(ctx.eval(&if_diff_type), Value::Void);
+		assert_eq!(ctx.locals[1], Value::Int(0));
+		assert_eq!(ctx.locals[2], Value::Real(1.0));
+	}
+
+	#[test]
+	fn test_function_calls() {
+		let mut symtab = SymbolTable::new();
+
+		// test function:
+		// if arg { 1 } else { 2 }
+		let test_func = Function::new_expr(
+			vec!["test".into()],
+			false,
+			symtab.int_type.clone(),
+			vec![(symtab.bool_type.clone(), "arg".into())],
+			expr(If(
+				box_expr(LocalGetResolved(0), &symtab.bool_type),
+				box_expr(Int(Ok(1)), &symtab.int_type),
+				Some(box_expr(Int(Ok(2)), &symtab.int_type))
+			), &symtab.int_type)
+		);
+		let mut test_func_node = SymTabNode::new_function();
+		test_func_node.get_function_variants_mut().unwrap().push(test_func.clone());
+		symtab.root.get_children_mut().unwrap().insert("test".into(), test_func_node);
+
+		let mut ctx = EvalContext { symtab: &symtab, locals: vec![Value::Bool(true)] };
+		let call_expr = expr(
+			FunctionCallResolved(test_func, vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
+			&symtab.int_type
+		);
+		assert_eq!(ctx.eval(&call_expr), Value::Int(1));
+		ctx.locals[0] = Value::Bool(false);
+		assert_eq!(ctx.eval(&call_expr), Value::Int(2));
 	}
 }

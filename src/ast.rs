@@ -137,6 +137,13 @@ impl Function {
 		}))
 	}
 
+	pub fn new_expr(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, expr: Expr) -> Function {
+		Function(Rc::new(FunctionData {
+			name, is_method, arguments, return_type,
+			body: RefCell::new(FunctionBody::Expr(expr))
+		}))
+	}
+
 	pub fn matches_types(&self, types: &[Type]) -> bool {
 		(self.0.arguments.len() == types.len()) &&
 		types.iter().zip(self.0.arguments.iter()).all(|(check, (arg, _))| check == arg)
@@ -170,6 +177,7 @@ pub enum ExprKind<P: Clone> {
 	LocalSetResolved(usize, Box<P>),
 	GlobalGet(QualID),
 	FunctionCall(QualID, Vec<P>),
+	FunctionCallResolved(Function, Vec<P>),
 	MethodCall(Box<P>, Symbol, Vec<P>),
 	If(Box<P>, Box<P>, Option<Box<P>>),
 	Let(Symbol, Box<P>),
