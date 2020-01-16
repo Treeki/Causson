@@ -34,7 +34,6 @@ impl EvalContext<'_> {
 			LocalGet(_) => unreachable!(),
 			LocalSet(_, _) => unreachable!(),
 			LocalGetResolved(index) => {
-				// self.locals.get(index).expect("invalid local index in eval").clone()
 				self.locals[*index].clone()
 			}
 			LocalSetResolved(index, sub_expr) => {
@@ -43,7 +42,10 @@ impl EvalContext<'_> {
 				value
 			}
 			GlobalGet(qid) => {
-				unreachable!()
+				// TODO this needs to work for non-symbolconstant stuff
+				let node = self.symtab.root.resolve(&qid).unwrap();
+				let symconst = node.get_symbol_constant().unwrap();
+				Value::Enum(symconst)
 			}
 			FunctionCall(_, _) => unreachable!(),
 			FunctionCallResolved(func, arg_exprs) => {

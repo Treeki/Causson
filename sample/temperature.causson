@@ -23,6 +23,10 @@ def Celsius:toState(self) -> WeatherState {
 	}
 }
 
-def main() -> Fahrenheit {
-	Celsius:wrap(20.).toFahrenheit()
+def main() -> WeatherState {
+	print(Celsius:wrap(10.).toFahrenheit().unwrap())
+	print()
+	print(Celsius:wrap(20.).toFahrenheit().unwrap())
+	print()
+	Celsius:wrap(20.).toState()
 }

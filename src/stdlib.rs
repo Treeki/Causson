@@ -18,6 +18,8 @@ impl SymbolTable {
 }
 
 pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
+	let void_ = symtab.void_type.clone();
+	let void_ = || { void_.clone() };
 	let int_ = symtab.int_type.clone();
 	let int_ = || { int_.clone() };
 	let real_ = symtab.real_type.clone();
@@ -35,6 +37,15 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	symtab.add_builtin_function(
 		vec!["test_builtin_function".into()], &int_(), &[],
 		move |_| Value::Int(100)
+	)?;
+
+	symtab.add_builtin_function(
+		vec!["print".into()], &void_(), &[],
+		move |_| { print!("\n"); Value::Void }
+	)?;
+	symtab.add_builtin_function(
+		vec!["print".into()], &void_(), &[(real_(), "v".into())],
+		move |args| { print!("{}", args[0].unchecked_real()); Value::Void }
 	)?;
 
 	Ok(())
