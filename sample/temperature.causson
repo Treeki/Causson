@@ -32,6 +32,6 @@ def Celsius:toState(self) -> WeatherState {
 	}
 }
 
-def main() -> void {
-
+def main() -> int {
+	test_builtin_function()
 }

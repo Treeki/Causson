@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::ops::Deref;
 use std::cell::{Ref, RefMut, RefCell};
 use std::collections::HashMap;
+use std::fmt;
 use symbol::Symbol;
 pub type ParseResult<T> = Result<T, <T as FromStr>::Err>;
 
@@ -99,12 +100,22 @@ pub struct TypeData {
 // Functions
 #[derive(Debug, Clone)]
 pub struct Function(Rc<FunctionData>);
-#[derive(Debug)]
+
 pub enum FunctionBody {
 	Incomplete(usize),
-	BuiltIn,
+	BuiltIn(Box<dyn Fn(&[Value]) -> Value>),
 	Expr(Expr)
 }
+impl fmt::Debug for FunctionBody {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			FunctionBody::Incomplete(id) => write!(f, "Incomplete({:})", id),
+			FunctionBody::BuiltIn(_) => write!(f, "BuiltIn(...)"),
+			FunctionBody::Expr(expr) => write!(f, "Expr({:?})", expr)
+		}
+	}
+}
+
 #[derive(Debug)]
 pub struct FunctionData {
 	pub name: QualID,
@@ -123,10 +134,12 @@ impl Function {
 	pub fn borrow(&self) -> Ref<FunctionBody> { self.0.body.borrow() }
 	pub fn borrow_mut(&mut self) -> RefMut<FunctionBody> { self.0.body.borrow_mut() }
 
-	pub fn new_builtin(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>) -> Function {
+	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, func: F) -> Function
+		where F: Fn(&[Value]) -> Value + 'static
+	{
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
-			body: RefCell::new(FunctionBody::BuiltIn)
+			body: RefCell::new(FunctionBody::BuiltIn(Box::new(func)))
 		}))
 	}
 
@@ -309,7 +322,8 @@ pub struct SymbolTable {
 pub enum SymTabError {
 	MissingNamespace,
 	NamespaceOrTypeExpected,
-	DuplicateName
+	DuplicateName,
+	DuplicateOverload
 }
 
 impl SymbolTable {
@@ -327,6 +341,12 @@ impl SymbolTable {
 		symtab.add_type(symtab.bool_type.clone()).unwrap();
 		symtab.add_type(symtab.int_type.clone()).unwrap();
 		symtab.add_type(symtab.real_type.clone()).unwrap();
+
+		symtab.add_builtin_function(
+			vec!["test_builtin_function".into()], &symtab.int_type.clone(), &[],
+			move |_| Value::Int(100)
+		).unwrap();
+
 		symtab
 	}
 
@@ -342,4 +362,55 @@ impl SymbolTable {
 			Ok(())
 		}
 	}
+
+	pub fn add_builtin_function<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&[Value]) -> Value + 'static
+	{
+		self.add_builtin_fn(false, qid, return_type, args, func)
+	}
+	pub fn add_builtin_method<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&[Value]) -> Value + 'static
+	{
+		self.add_builtin_fn(true, qid, return_type, args, func)
+	}
+	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&[Value]) -> Value + 'static
+	{
+		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), args.to_vec(), func))
+	}
+
+	pub fn add_function(&mut self, func: Function) -> Result<(), SymTabError> {
+		let func_copy = func.clone();
+		let (name, container) = func.name.split_last().unwrap();
+		let container = self.root.resolve_mut(container).ok_or(SymTabError::MissingNamespace)?;
+		let hashmap = container.get_children_mut().ok_or(SymTabError::NamespaceOrTypeExpected)?;
+		if let Some(existing) = hashmap.get_mut(&name) {
+			// add to the existing function?
+			let group = existing.get_function_variants().ok_or(SymTabError::DuplicateName)?;
+			if group.iter().any(|c| c.matches_arguments(&func.arguments)) {
+				Err(SymTabError::DuplicateOverload)
+			} else {
+				existing.get_function_variants_mut().unwrap().push(func_copy);
+				Ok(())
+			}
+		} else {
+			let mut node = SymTabNode::new_function();
+			node.get_function_variants_mut().unwrap().push(func_copy);
+			hashmap.insert(*name, node);
+			Ok(())
+		}
+	}
 }
+
+
+
+// Execution Data
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value {
+	Void,
+	Bool(bool),
+	Int(i64),
+	Real(f64),
+	Enum(Symbol)
+}
+

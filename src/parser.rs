@@ -8,13 +8,11 @@ lazy_static! {
 #[derive(Debug, PartialEq)]
 pub enum ParserError {
 	SymTab(SymTabError),
-	NameAlreadyUsed,
 	TypeIsMissing,
 	TypeIsIncomplete,
 	TypeDependencyCycle,
 	FunctionIsMissing,
 	NoMatchingOverload,
-	DuplicateOverload,
 	TypeMismatch,
 	InvalidAssignTarget,
 	InvalidCall,
@@ -22,8 +20,7 @@ pub enum ParserError {
 	BadIfConditionType,
 	VariableNotFound,
 	ConstantNotFound,
-	MissingNamespace,
-	InvalidNamespace
+	MissingNamespace
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
 
@@ -55,7 +52,6 @@ impl Type {
 		}
 	}
 	fn ensure_equal(a: &Type, b: &Type) -> Result<()> {
-		println!("comparing {:?} and {:?}", a.name, b.name);
 		Type::err_if_not_equal(a, b, ParserError::TypeMismatch)
 	}
 }
@@ -80,8 +76,18 @@ impl ParseContext {
 				target_type.ensure_complete()?;
 				*typ.borrow_mut() = TypeBody::Wrapper(target_type.clone());
 
-				self.add_builtin_function(&typ, &"wrap".into(), &typ, &[(target_type.clone(), "v".into())])?;
-				self.add_builtin_method(&typ, &"unwrap".into(), &target_type, &[])?;
+				let mut n = typ.name.clone();
+				n.push("wrap".into());
+				self.symtab.add_builtin_function(
+					n, &typ, &[(target_type.clone(), "v".into())],
+					move |args| args[0].clone()
+				)?;
+				let mut n = typ.name.clone();
+				n.push("unwrap".into());
+				self.symtab.add_builtin_method(
+					n, &target_type, &[],
+					move |args| args[0].clone()
+				)?;
 
 				Ok(())
 			}
@@ -135,39 +141,6 @@ impl ParseContext {
 		Ok(())
 	}
 
-	fn add_builtin_function(&mut self, typ: &Type, name: &Symbol, return_type: &Type, args: &[(Type, Symbol)]) -> Result<()> {
-		self.add_builtin_fn(typ, false, name, return_type, args)
-	}
-	fn add_builtin_method(&mut self, typ: &Type, name: &Symbol, return_type: &Type, args: &[(Type, Symbol)]) -> Result<()> {
-		self.add_builtin_fn(typ, true, name, return_type, args)
-	}
-	fn add_builtin_fn(&mut self, typ: &Type, is_method: bool, name: &Symbol, return_type: &Type, args: &[(Type, Symbol)]) -> Result<()> {
-		let mut full_name = typ.name.clone();
-		full_name.push(*name);
-		self.add_function(Function::new_builtin(full_name, is_method, return_type.clone(), args.to_vec()))
-	}
-
-	fn add_function(&mut self, func: Function) -> Result<()> {
-		let func_copy = func.clone();
-		let (name, container) = func.name.split_last().unwrap();
-		let container = self.symtab.root.resolve_mut(container).ok_or(ParserError::MissingNamespace)?;
-		let hashmap = container.get_children_mut().ok_or(ParserError::InvalidNamespace)?;
-		if let Some(existing) = hashmap.get_mut(&name) {
-			// add to the existing function?
-			let group = existing.get_function_variants().ok_or(ParserError::NameAlreadyUsed)?;
-			if group.iter().any(|c| c.matches_arguments(&func.arguments)) {
-				Err(ParserError::DuplicateOverload)
-			} else {
-				existing.get_function_variants_mut().unwrap().push(func_copy);
-				Ok(())
-			}
-		} else {
-			let mut node = SymTabNode::new_function();
-			node.get_function_variants_mut().unwrap().push(func_copy);
-			hashmap.insert(*name, node);
-			Ok(())
-		}
-	}
 
 	fn collect_function_specs(&mut self, prog: &Program) -> Result<()> {
 		for (i, def) in prog.iter().enumerate() {
@@ -190,7 +163,7 @@ impl ParseContext {
 					FuncType::Function => false,
 					FuncType::Method   => true
 				};
-				self.add_function(Function::new_incomplete(
+				self.symtab.add_function(Function::new_incomplete(
 					name.clone(), is_method, return_type, args, i
 				))?;
 			}
@@ -206,9 +179,7 @@ impl ParseContext {
 				let variants = func.get_function_variants().unwrap();
 				let mut func = variants.iter().find(|f| f.is_incomplete(i)).unwrap().clone();
 
-				println!("SUGARED EXPRESSION: {:?}", hlexpr);
 				let expr = desugar_expr(hlexpr)?;
-				println!("DESUGARED EXPRESSION: {:?}", expr);
 				let expr = self.check_function(&func, &expr)?;
 				*func.borrow_mut() = FunctionBody::Expr(expr);
 			}
@@ -431,11 +402,12 @@ impl<'a> CodeParseContext<'a> {
 }
 
 
-pub fn magic(prog: &Program) {
+pub fn make_symtab_from_program(prog: &Program) -> Result<SymbolTable> {
 	let mut ctx = ParseContext::new();
-	ctx.collect_types(prog).expect("Yep");
-	ctx.collect_function_specs(prog).expect("Yep");
-	ctx.collect_function_bodies(prog).expect("Yep");
+	ctx.collect_types(prog)?;
+	ctx.collect_function_specs(prog)?;
+	ctx.collect_function_bodies(prog)?;
+	Ok(ctx.symtab)
 }
 
 

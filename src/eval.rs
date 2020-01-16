@@ -1,13 +1,13 @@
 use crate::ast::*;
 use symbol::Symbol;
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Value {
-	Void,
-	Bool(bool),
-	Int(i64),
-	Real(f64),
-	Enum(Symbol)
+pub fn call_func(symtab: &SymbolTable, qid: &[Symbol], args: &[Value], arg_types: &[Type]) -> Option<Value> {
+	assert!(args.len() == arg_types.len());
+	let node = symtab.root.resolve(qid)?;
+	let variants = node.get_function_variants()?;
+	let func = variants.iter().find(|f| f.matches_types(arg_types))?;
+	let context = EvalContext { symtab, locals: vec![] };
+	Some(context.eval_func(func, args.to_vec()))
 }
 
 pub struct EvalContext<'a> {
@@ -16,6 +16,17 @@ pub struct EvalContext<'a> {
 }
 
 impl EvalContext<'_> {
+	pub fn eval_func(&self, func: &Function, args: Vec<Value>) -> Value {
+		match &*func.borrow() {
+			FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
+			FunctionBody::Expr(sub_expr) => {
+				let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
+				sub_ctx.eval(&sub_expr)
+			}
+			FunctionBody::BuiltIn(f) => f(&args)
+		}
+	}
+
 	pub fn eval(&mut self, expr: &Expr) -> Value {
 		use ExprKind::*;
 
@@ -37,14 +48,7 @@ impl EvalContext<'_> {
 			FunctionCall(_, _) => unreachable!(),
 			FunctionCallResolved(func, arg_exprs) => {
 				let args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
-				match &*func.borrow() {
-					FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
-					FunctionBody::Expr(sub_expr) => {
-						let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
-						sub_ctx.eval(&sub_expr)
-					}
-					FunctionBody::BuiltIn => unreachable!()
-				}
+				self.eval_func(func, args)
 			}
 			MethodCall(obj_expr, sym, arg_exprs) => {
 				// dynamic dispatch will go here eventually

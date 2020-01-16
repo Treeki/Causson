@@ -14,11 +14,8 @@ mod parser;
 
 fn main() {
     let code = std::fs::read_to_string("sample/temperature.causson").unwrap();
-    match ast_builder::parse_causson_code(&code) {
-        Ok(result) => {
-            parser::magic(&result);
-            println!("{:?}", result);
-        }
-        Err(err) => println!("{}", err)
-    }
+    let parsed = ast_builder::parse_causson_code(&code).unwrap();
+    let symtab = parser::make_symtab_from_program(&parsed).unwrap();
+    let result = eval::call_func(&symtab, &["main".into()], &[], &[]).unwrap();
+    println!("Program Result: {:?}", result);
 }
