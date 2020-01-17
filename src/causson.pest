@@ -11,9 +11,12 @@ qualifiedID = {(id ~ ":")* ~ id}
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
-    termPiece = _{ifTerm | letTerm | bTrue | bFalse | qualifiedID | real | int | ("(" ~ expr ~ ")")}
+    termPiece = _{ifTerm | letTerm | bTrue | bFalse | qualifiedID | real | int | string | ("(" ~ expr ~ ")")}
       int = @{("+" | "-")? ~ ASCII_DIGIT+}
       real = @{int ~ "." ~ ASCII_DIGIT*}
+      string = ${"\"" ~ stringInner ~ "\""}
+        stringInner = @{stringChar*}
+        stringChar = {!("\"") ~ ANY}
       bTrue = {"true"}
       bFalse = {"false"}
       ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}

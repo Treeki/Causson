@@ -9,7 +9,9 @@ extern crate symbol;
 
 mod ast;
 mod ast_builder;
+mod data;
 mod eval;
+mod gc;
 mod parser;
 mod stdlib;
 
@@ -19,4 +21,11 @@ fn main() {
     let symtab = parser::make_symtab_from_program(&parsed).unwrap();
     let result = eval::call_func(&symtab, &["main".into()], &[], &[]).unwrap();
     println!("Program Result: {:?}", result);
+    data::MAIN_GC.with(|gc| {
+        println!("GC Nodes: {}", gc.node_count());
+        gc.dump();
+        gc.sweep();
+        println!("After sweep: GC Nodes: {}", gc.node_count());
+        gc.dump();
+    });
 }

@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::data::*;
 
 impl SymbolTable {
 	fn add_binary<F: Fn(&[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
@@ -26,6 +27,8 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	let real_ = || { real_.clone() };
 	let bool_ = symtab.bool_type.clone();
 	let bool_ = || { bool_.clone() };
+	let str_ = symtab.str_type.clone();
+	let str_ = || { str_.clone() };
 
 	symtab.add_binary_bool(bool_(), "op#==", move |args| Value::Bool(args[0].unchecked_bool() == args[1].unchecked_bool()))?;
 	symtab.add_binary_bool(bool_(), "op#!=", move |args| Value::Bool(args[0].unchecked_bool() != args[1].unchecked_bool()))?;
@@ -62,8 +65,16 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		move |_| { print!("\n"); Value::Void }
 	)?;
 	symtab.add_builtin_function(
+		vec!["print".into()], &void_(), &[(int_(), "v".into())],
+		move |args| { print!("{}", args[0].unchecked_int()); Value::Void }
+	)?;
+	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[(real_(), "v".into())],
 		move |args| { print!("{}", args[0].unchecked_real()); Value::Void }
+	)?;
+	symtab.add_builtin_function(
+		vec!["print".into()], &void_(), &[(str_(), "v".into())],
+		move |args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
 
 	Ok(())

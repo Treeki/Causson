@@ -97,6 +97,7 @@ fn parse_term_piece(pair: Pair) -> HLExpr {
 		Rule::bFalse => HLExpr::Bool(false),
 		Rule::real => HLExpr::Real(pair.as_str().parse()),
 		Rule::int => HLExpr::Int(pair.as_str().parse()),
+		Rule::string => HLExpr::Str(pair.into_inner().next().unwrap().as_str().to_string()),
 		Rule::ifTerm => parse_if_piece(&mut pair.into_inner().peekable()),
 		Rule::letTerm => {
 			let mut pairs = pair.into_inner();

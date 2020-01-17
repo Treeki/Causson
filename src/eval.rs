@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::data::*;
 use symbol::Symbol;
 
 pub fn call_func(symtab: &SymbolTable, qid: &[Symbol], args: &[Value], arg_types: &[Type]) -> Option<Value> {
@@ -102,6 +103,7 @@ impl EvalContext<'_> {
 			Int(r)  => Value::Int(*r.as_ref().expect("int constant must be valid")),
 			Real(r) => Value::Real(*r.as_ref().expect("real constant must be valid")),
 			Bool(v) => Value::Bool(*v),
+			Str(s)  => Obj::Str(s.clone()).to_heap(),
 		}
 	}
 }

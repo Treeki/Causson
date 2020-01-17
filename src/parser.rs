@@ -263,7 +263,8 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 		}
 		HLExpr::Int(result)  => Ok(UncheckedExpr(ExprKind::Int(result.clone()))),
 		HLExpr::Real(result) => Ok(UncheckedExpr(ExprKind::Real(result.clone()))),
-		HLExpr::Bool(value)  => Ok(UncheckedExpr(ExprKind::Bool(*value)))
+		HLExpr::Bool(value)  => Ok(UncheckedExpr(ExprKind::Bool(*value))),
+		HLExpr::Str(string)  => Ok(UncheckedExpr(ExprKind::Str(string.clone())))
 	}
 }
 
@@ -386,7 +387,8 @@ impl<'a> CodeParseContext<'a> {
 			}
 			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: self.parent.symtab.int_type.clone() }),
 			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: self.parent.symtab.real_type.clone() }),
-			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: self.parent.symtab.bool_type.clone() })
+			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: self.parent.symtab.bool_type.clone() }),
+			Str(s)  => Ok(Expr { expr: Str(s.clone()),  typ: self.parent.symtab.str_type.clone() }),
 		}
 	}
 }

@@ -1,12 +1,12 @@
-type WeatherState = enum(Freezing, Cold, Warm, Hot)
+type WeatherState = enum(\
+	Freezing, Cold, Warm, Hot)
 
 type Celsius = wrap real
 type Fahrenheit = wrap real
 
 def Celsius:toFahrenheit(self) -> Fahrenheit {
 	let base = self.unwrap()
-	base = base * (9. / 5.)
-	base = base + 32.
+	base = base * (9. / 5.) + 32.
 	Fahrenheit:wrap(base)
 }
 
@@ -24,8 +24,10 @@ def Celsius:toState(self) -> WeatherState {
 }
 
 def main() -> WeatherState {
+	print("Converting 10: ")
 	print(Celsius:wrap(10.).toFahrenheit().unwrap())
 	print()
+	print("Converting 20: ")
 	print(Celsius:wrap(20.).toFahrenheit().unwrap())
 	print()
 	Celsius:wrap(20.).toState()

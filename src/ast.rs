@@ -5,6 +5,7 @@ use std::cell::{Ref, RefMut, RefCell};
 use std::collections::HashMap;
 use std::fmt;
 use symbol::Symbol;
+use crate::data::Value;
 pub type ParseResult<T> = Result<T, <T as FromStr>::Err>;
 
 pub type QualID = Vec<Symbol>;
@@ -22,7 +23,8 @@ pub enum HLExpr {
 	CodeBlock(Vec<HLExpr>),
 	Int(ParseResult<i64>),
 	Real(ParseResult<f64>),
-	Bool(bool)
+	Bool(bool),
+	Str(String)
 }
 
 // A definition for a new type
@@ -52,9 +54,10 @@ pub type Program = Vec<GlobalDef>;
 
 // Typing
 // TODO: Move this elsewhere?
+// TODO: Rename to BuiltinType or even remove?
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
-	Void, Bool, Int, Real
+	Void, Bool, Int, Real, Str
 }
 
 
@@ -197,7 +200,8 @@ pub enum ExprKind<P: Clone> {
 	CodeBlock(Vec<P>),
 	Int(ParseResult<i64>),
 	Real(ParseResult<f64>),
-	Bool(bool)
+	Bool(bool),
+	Str(String)
 }
 
 #[derive(Debug, Clone)]
@@ -232,15 +236,6 @@ impl SymTabNode {
 	pub fn new_symbol_constant(sym: Symbol) -> SymTabNode {
 		SymTabNode::SymbolConstant(sym)
 	}
-
-	// pub fn has_children(&self) -> bool {
-	// 	match self {
-	// 		SymTabNode::Namespace { .. }  => true,
-	// 		SymTabNode::Type      { .. }  => true,
-	// 		SymTabNode::Function  { .. }  => false,
-	// 		SymTabNode::SymbolConstant(_) => false
-	// 	}
-	// }
 
 	pub fn get_children(&self) -> Option<&HashMap<Symbol, SymTabNode>> {
 		match self {
@@ -315,6 +310,7 @@ pub struct SymbolTable {
 	pub bool_type: Type,
 	pub int_type: Type,
 	pub real_type: Type,
+	pub str_type: Type,
 	pub root: SymTabNode
 }
 
@@ -334,6 +330,7 @@ impl SymbolTable {
 			bool_type: Type::from_primitive("bool", Bool),
 			int_type: Type::from_primitive("int", Int),
 			real_type: Type::from_primitive("real", Real),
+			str_type: Type::from_primitive("str", Str),
 			root: SymTabNode::new_namespace()
 		};
 
@@ -341,6 +338,7 @@ impl SymbolTable {
 		symtab.add_type(symtab.bool_type.clone()).unwrap();
 		symtab.add_type(symtab.int_type.clone()).unwrap();
 		symtab.add_type(symtab.real_type.clone()).unwrap();
+		symtab.add_type(symtab.str_type.clone()).unwrap();
 
 		crate::stdlib::inject(&mut symtab).expect("standard library injection failed");
 
@@ -402,42 +400,4 @@ impl SymbolTable {
 	}
 }
 
-
-
-// Execution Data
-#[derive(Debug, PartialEq, Clone)]
-pub enum Value {
-	Void,
-	Bool(bool),
-	Int(i64),
-	Real(f64),
-	Enum(Symbol)
-}
-
-impl Value {
-	pub fn unchecked_bool(&self) -> bool {
-		match self {
-			Value::Bool(v) => *v,
-			_ => panic!("Bool value expected")
-		}
-	}
-	pub fn unchecked_int(&self) -> i64 {
-		match self {
-			Value::Int(v) => *v,
-			_ => panic!("Int value expected")
-		}
-	}
-	pub fn unchecked_real(&self) -> f64 {
-		match self {
-			Value::Real(v) => *v,
-			_ => panic!("Real value expected")
-		}
-	}
-	pub fn unchecked_enum_symbol(&self) -> Symbol {
-		match self {
-			Value::Enum(sym) => *sym,
-			_ => panic!("Enum value expected")
-		}
-	}
-}
 
