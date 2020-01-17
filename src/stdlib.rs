@@ -78,11 +78,6 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	)?;
 
 	symtab.add_builtin_function(
-		vec!["test_builtin_function".into()], &int_(), &[],
-		move |_| Value::Int(100)
-	)?;
-
-	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[],
 		move |_| { print!("\n"); Value::Void }
 	)?;
