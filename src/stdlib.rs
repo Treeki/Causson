@@ -55,6 +55,28 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	symtab.add_binary_bool(real_(), "op#>", move |args| Value::Bool(args[0].unchecked_real() > args[1].unchecked_real()))?;
 	symtab.add_binary_bool(real_(), "op#>=", move |args| Value::Bool(args[0].unchecked_real() >= args[1].unchecked_real()))?;
 
+	symtab.add_binary(str_(), "op#+", move |args| {
+		let a = args[0].borrow_obj().unwrap();
+		let b = args[1].borrow_obj().unwrap();
+		let mut s = String::with_capacity(a.unchecked_str().len() + b.unchecked_str().len());
+		s.push_str(a.unchecked_str());
+		s.push_str(b.unchecked_str());
+		Obj::Str(s).to_heap()
+	})?;
+
+	symtab.add_builtin_function(
+		vec!["str".into(), "from".into()], &str_(), &[(bool_(), "v".into())],
+		move |args| Obj::Str(args[0].unchecked_bool().to_string()).to_heap()
+	)?;
+	symtab.add_builtin_function(
+		vec!["str".into(), "from".into()], &str_(), &[(int_(), "v".into())],
+		move |args| Obj::Str(args[0].unchecked_int().to_string()).to_heap()
+	)?;
+	symtab.add_builtin_function(
+		vec!["str".into(), "from".into()], &str_(), &[(real_(), "v".into())],
+		move |args| Obj::Str(args[0].unchecked_real().to_string()).to_heap()
+	)?;
+
 	symtab.add_builtin_function(
 		vec!["test_builtin_function".into()], &int_(), &[],
 		move |_| Value::Int(100)

@@ -23,12 +23,13 @@ def Celsius:toState(self) -> WeatherState {
 	}
 }
 
+def testIt(real value) -> void {
+	print("Converting " + str:from(value) + ": " + str:from(Celsius:wrap(value).toFahrenheit().unwrap()))
+	print()
+}
+
 def main() -> WeatherState {
-	print("Converting 10: ")
-	print(Celsius:wrap(10.).toFahrenheit().unwrap())
-	print()
-	print("Converting 20: ")
-	print(Celsius:wrap(20.).toFahrenheit().unwrap())
-	print()
+	testIt(10.)
+	testIt(20.)
 	Celsius:wrap(20.).toState()
 }
