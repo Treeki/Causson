@@ -415,10 +415,28 @@ pub enum Value {
 }
 
 impl Value {
+	pub fn unchecked_bool(&self) -> bool {
+		match self {
+			Value::Bool(v) => *v,
+			_ => panic!("Bool value expected")
+		}
+	}
+	pub fn unchecked_int(&self) -> i64 {
+		match self {
+			Value::Int(v) => *v,
+			_ => panic!("Int value expected")
+		}
+	}
 	pub fn unchecked_real(&self) -> f64 {
 		match self {
 			Value::Real(v) => *v,
 			_ => panic!("Real value expected")
+		}
+	}
+	pub fn unchecked_enum_symbol(&self) -> Symbol {
+		match self {
+			Value::Enum(sym) => *sym,
+			_ => panic!("Enum value expected")
 		}
 	}
 }

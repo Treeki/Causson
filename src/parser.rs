@@ -1,5 +1,6 @@
 use symbol::Symbol;
 use crate::ast::*;
+use crate::stdlib;
 
 lazy_static! {
 	static ref ASSIGN_OP: Symbol = "=".into();
@@ -76,17 +77,7 @@ impl ParseContext {
 				target_type.ensure_complete()?;
 				*typ.borrow_mut() = TypeBody::Wrapper(target_type.clone());
 
-				let mut n = typ.name.clone();
-				n.push("wrap".into());
-				self.symtab.add_builtin_function(
-					n, &typ, &[(target_type.clone(), "v".into())],
-					move |args| args[0].clone()
-				)?;
-				self.symtab.add_builtin_method(
-					&typ, "unwrap", &target_type, &[],
-					move |args| args[0].clone()
-				)?;
-
+				stdlib::inject_wrap_type(&mut self.symtab, typ, target_type)?;
 				Ok(())
 			}
 			HLTypeDef::Enum(ids) => {
@@ -94,6 +85,7 @@ impl ParseContext {
 				for id in ids {
 					node.get_children_mut().unwrap().insert(*id, SymTabNode::new_symbol_constant(*id));
 				}
+				stdlib::inject_enum_type(&mut self.symtab, typ)?;
 				Ok(())
 			}
 		}
