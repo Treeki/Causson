@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::data::*;
+use gtk::prelude::*;
 
 impl SymbolTable {
 	fn add_binary<F: Fn(&[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
@@ -92,6 +93,28 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[(str_(), "v".into())],
 		move |args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
+	)?;
+
+	// TODO checkme, there should be a better way to do namespacing
+	symtab.add_type(Type::from_body(vec!["gui".into()], TypeBody::Incomplete))?;
+	symtab.add_builtin_function(
+		vec!["gui".into(), "init".into()], &void_(), &[],
+		move |_args| { gtk::init().expect("GTK init failed"); Value::Void }
+	)?;
+	symtab.add_builtin_function(
+		vec!["gui".into(), "run".into()], &void_(), &[],
+		move |_args| { gtk::main(); Value::Void }
+	)?;
+
+	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
+	symtab.add_type(window.clone())?;
+	symtab.add_builtin_function(
+		vec!["gui".into(), "Window".into(), "new".into()], &window, &[],
+		move |_args| { Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap() }
+	)?;
+	symtab.add_builtin_method(
+		&window, "show", &void_(), &[],
+		move |args| { args[0].borrow_obj().unwrap().unchecked_gui_window().show(); Value::Void }
 	)?;
 
 	Ok(())

@@ -1,0 +1,7 @@
+def main() -> void {
+	gui:init()
+	let wnd = gui:Window:new()
+	wnd.show()
+	gui:run()
+}
+

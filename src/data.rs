@@ -9,7 +9,8 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 
 #[derive(Debug)]
 pub enum Obj {
-	Str(String)
+	Str(String),
+	GuiWindow(gtk::Window)
 }
 
 impl Obj {
@@ -23,6 +24,12 @@ impl Obj {
 		match self {
 			Obj::Str(s) => s,
 			_ => panic!("Str heapobj expected")
+		}
+	}
+	pub fn unchecked_gui_window(&self) -> &gtk::Window {
+		match self {
+			Obj::GuiWindow(w) => w,
+			_ => panic!("GuiWindow heapobj expected")
 		}
 	}
 }
