@@ -88,6 +88,19 @@ impl ParseContext {
 				stdlib::inject_enum_type(&mut self.symtab, typ)?;
 				Ok(())
 			}
+			HLTypeDef::Record(fields) => {
+				let fields = fields.iter().map(
+					|(tref, field_id)|
+					self.symtab.root
+						.resolve(tref)
+						.and_then(SymTabNode::get_type)
+						.ok_or(ParserError::TypeIsMissing)
+						.map(|t| (t, field_id.clone()))
+				).collect::<Result<Vec<(Type, Symbol)>>>()?;
+				stdlib::inject_record_type(&mut self.symtab, typ.clone(), &fields)?;
+				*typ.borrow_mut() = TypeBody::Record(fields);
+				Ok(())
+			}
 		}
 	}
 

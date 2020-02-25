@@ -10,6 +10,8 @@ qualifiedID = {(id ~ ":")* ~ id}
 
 fieldID = @{"@" ~ id}
 
+typedID = {qualifiedID ~ id}
+
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
@@ -43,16 +45,14 @@ codeBlock = {NEWLINE* ~ (expr ~ NEWLINE+)* ~ expr?}
 
 // Global Definitions
 gTypeDef = {"type" ~ qualifiedID ~ "=" ~ typeDef}
-  typeDef = _{enumDef | wrapDef}
+  typeDef = _{enumDef | wrapDef | recordDef}
     enumDef = {"enum" ~ "(" ~ (id ~ ",")* ~ id ~ ","? ~ ")"}
     wrapDef = {"wrap" ~ qualifiedID}
-    recordDef = {"record" ~ "{" ~ NEWLINE* ~ (recordSubDef ~ (NEWLINE | ",")+)+ ~ "}"}
-      recordSubDef = {qualifiedID ~ id}
+    recordDef = {"record" ~ "{" ~ NEWLINE* ~ (typedID ~ (NEWLINE | ",")+)* ~ (typedID ~ (NEWLINE | ",")?)? ~ "}"}
 
 gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
-  funcSpec = {qualifiedID ~ (("(" ~ funcSelfArg? ~ ")") | ("(" ~ (funcSelfArg ~ ",")? ~ (funcArg ~ ",")* ~ funcArg ~ ")"))}
+  funcSpec = {qualifiedID ~ (("(" ~ funcSelfArg? ~ ")") | ("(" ~ (funcSelfArg ~ ",")? ~ (typedID ~ ",")* ~ typedID ~ ")"))}
     funcSelfArg = {"self"}
-    funcArg = {qualifiedID ~ id}
 
 //gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ "}"}
 //  compSubDef = _{compFieldDef | compInstance | compMethodDef | compPropertySet}

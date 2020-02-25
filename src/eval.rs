@@ -24,7 +24,7 @@ impl EvalContext<'_> {
 				let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
 				sub_ctx.eval(&sub_expr)
 			}
-			FunctionBody::BuiltIn(f) => f(&args)
+			FunctionBody::BuiltIn(f) => f(self.symtab, &args)
 		}
 	}
 

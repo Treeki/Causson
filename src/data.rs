@@ -10,6 +10,7 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 #[derive(Debug)]
 pub enum Obj {
 	Str(String),
+	Record(Vec<Value>),
 	GuiWindow(gtk::Window)
 }
 
@@ -24,6 +25,18 @@ impl Obj {
 		match self {
 			Obj::Str(s) => s,
 			_ => panic!("Str heapobj expected")
+		}
+	}
+	pub fn unchecked_record(&self) -> &Vec<Value> {
+		match self {
+			Obj::Record(v) => v,
+			_ => panic!("Record heapobj expected")
+		}
+	}
+	pub fn unchecked_record_mut(&mut self) -> &mut Vec<Value> {
+		match self {
+			Obj::Record(v) => v,
+			_ => panic!("Record heapobj expected")
 		}
 	}
 	pub fn unchecked_gui_window(&self) -> &gtk::Window {

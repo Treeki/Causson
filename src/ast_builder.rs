@@ -125,6 +125,10 @@ fn parse_type_def(pair: Pair) -> HLTypeDef {
 		Rule::enumDef => {
 			HLTypeDef::Enum(pair.into_inner().map(parse_id).collect())
 		},
+		Rule::recordDef => {
+			let fields = pair.into_inner().map(parse_typed_id).collect();
+			HLTypeDef::Record(fields)
+		},
 		_ => unreachable!()
 	}
 }
@@ -141,12 +145,12 @@ fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<FuncArg>) {
 			pairs.next();
 		}
 	}
-	let func_args = pairs.map(parse_func_arg).collect();
+	let func_args = pairs.map(parse_typed_id).collect();
 	(func_name, func_type, func_args)
 }
 
-fn parse_func_arg(pair: Pair) -> FuncArg {
-	assert_eq!(pair.as_rule(), Rule::funcArg);
+fn parse_typed_id(pair: Pair) -> (QualID, Symbol) {
+	assert_eq!(pair.as_rule(), Rule::typedID);
 	let mut pairs = pair.into_inner();
 	let typeref = pairs.next().unwrap();
 	let id = pairs.next().unwrap();
@@ -253,6 +257,25 @@ mod tests {
 	#[should_panic]
 	fn test_empty_enum_type() {
 		pcc("type x = enum()").unwrap();
+	}
+
+	#[test]
+	fn test_record_type() {
+		let x_qid = vec!["x".into()];
+		let int_a = (vec!["int".into()], "a".into());
+		let real_b = (vec!["real".into()], "b".into());
+		let xyz_c = (vec!["xyz".into()], "c".into());
+
+		let c = pcc("type x = record { int a, real b }").unwrap();
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![int_a.clone(), real_b.clone()]))]);
+		let c = pcc("type x = record { real b }").unwrap();
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		let c = pcc("type x = record {\nreal b\n}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		let c = pcc("type x = record {real b,}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		let c = pcc("type x = record { int a\nreal b, xyz c\n }").unwrap();
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![int_a.clone(), real_b.clone(), xyz_c.clone()]))]);
 	}
 
 	#[test]

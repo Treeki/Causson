@@ -1,0 +1,32 @@
+type Point = record { int x, int y }
+
+def str:from(Point pt) -> str {
+	str:from(pt.x) + "," + str:from(pt.y)
+}
+
+def Point:new(int x, int y) -> Point {
+	let pt = Point:default()
+	pt.x = x
+	pt.y = y
+	pt
+}
+
+def Point:op#+(self, Point other) -> Point {
+	Point:new(self.x + other.x, self.y + other.y)
+}
+
+def main() -> void {
+	let pt = Point:default()
+
+	print("orig pt: " + str:from(pt))
+	print()
+
+	pt.x = 10
+	pt.y = 20
+	print("updated pt: " + str:from(pt))
+	print()
+	
+	pt = pt + Point:new(500, 600)
+	print("added pt: " + str:from(pt))
+	print()
+}

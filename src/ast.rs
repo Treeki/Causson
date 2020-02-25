@@ -31,7 +31,8 @@ pub enum HLExpr {
 #[derive(Debug, PartialEq)]
 pub enum HLTypeDef {
 	Enum(Vec<Symbol>),
-	Wrap(QualID)
+	Wrap(QualID),
+	Record(Vec<(QualID, Symbol)>)
 }
 
 pub type FuncArg = (QualID, Symbol);
@@ -91,12 +92,21 @@ pub enum TypeBody {
 	Incomplete,
 	Enum,
 	Primitive(PrimitiveType),
-	Wrapper(Type)
+	Wrapper(Type),
+	Record(Vec<(Type, Symbol)>)
 }
 #[derive(Debug)]
 pub struct TypeData {
 	pub name: QualID,
 	body: RefCell<TypeBody>
+}
+impl TypeBody {
+	pub fn unchecked_record_fields(&self) -> &Vec<(Type, Symbol)> {
+		match self {
+			TypeBody::Record(fields) => fields,
+			_ => panic!("Record TypeBody expected")
+		}
+	}
 }
 
 
@@ -106,7 +116,7 @@ pub struct Function(Rc<FunctionData>);
 
 pub enum FunctionBody {
 	Incomplete(usize),
-	BuiltIn(Box<dyn Fn(&[Value]) -> Value>),
+	BuiltIn(Box<dyn Fn(&SymbolTable, &[Value]) -> Value>),
 	Expr(Expr)
 }
 impl fmt::Debug for FunctionBody {
@@ -138,7 +148,7 @@ impl Function {
 	pub fn borrow_mut(&mut self) -> RefMut<FunctionBody> { self.0.body.borrow_mut() }
 
 	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, func: F) -> Function
-		where F: Fn(&[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
 	{
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
@@ -359,12 +369,20 @@ impl SymbolTable {
 	}
 
 	pub fn add_builtin_function<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
+	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+	{
+		let mut qid = Vec::with_capacity(typ.name.len() + 1);
+		for n in &typ.name { qid.push(*n) }
+		qid.push(name.into());
+		self.add_builtin_fn(false, qid, return_type, args, func)
+	}
 	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
 	{
 		let mut qid = Vec::with_capacity(typ.name.len() + 1);
 		for n in &typ.name { qid.push(*n) }
@@ -372,7 +390,7 @@ impl SymbolTable {
 		self.add_builtin_fn(true, qid, return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
 	{
 		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), args.to_vec(), func))
 	}
