@@ -158,8 +158,8 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 		)?;
 	}
 
-	// TODO: only create 'default' for records that are all default types
-	// TODO: allow creation of records with non-default types
+	// TODO: only create 'default' for records that are all default types?
+	//   (although, this might cause issues as default methods can be defined later...)
 	let typ_ = typ.clone();
 	symtab.add_builtin_static_method(
 		&typ, "default", &typ, &[],
@@ -175,6 +175,11 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 
 			Obj::Record(values).to_heap()
 		}
+	)?;
+
+	symtab.add_builtin_static_method(
+		&typ, "build", &typ, &fields,
+		move |_, args| Obj::Record(args.to_vec()).to_heap()
 	)?;
 
 	Ok(())
