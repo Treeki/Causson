@@ -18,7 +18,8 @@ mod parser;
 mod stdlib;
 
 fn main() {
-    let code = std::fs::read_to_string("sample/record.causson").unwrap();
+    let args = std::env::args().collect::<Vec<String>>();
+    let code = std::fs::read_to_string(&args[1]).unwrap();
     let parsed = ast_builder::parse_causson_code(&code).unwrap();
     let symtab = parser::make_symtab_from_program(&parsed).unwrap();
     let result = eval::call_func(&symtab, &["main".into()], &[], &[]).unwrap();
