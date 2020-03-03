@@ -46,7 +46,8 @@ codeBlock = {NEWLINE* ~ (expr ~ NEWLINE+)* ~ expr?}
 // Global Definitions
 gTypeDef = {"type" ~ qualifiedID ~ "=" ~ typeDef}
   typeDef = _{enumDef | wrapDef | recordDef}
-    enumDef = {"enum" ~ "(" ~ (id ~ ",")* ~ id ~ ","? ~ ")"}
+    enumDef = {"enum" ~ "(" ~ (enumValue ~ ",")* ~ enumValue ~ ","? ~ ")"}
+      enumValue = {id ~ ("(" ~ (typedID ~ ",")* ~ (typedID ~ ","?)? ~ ")")?}
     wrapDef = {"wrap" ~ qualifiedID}
     recordDef = {"record" ~ "{" ~ NEWLINE* ~ (typedID ~ (NEWLINE | ",")+)* ~ (typedID ~ (NEWLINE | ",")?)? ~ "}"}
 

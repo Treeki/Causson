@@ -1,8 +1,10 @@
 type WeatherState = enum(\
-	Freezing, Cold, Warm, Hot)
+	Freezing(bool brr), Cold, Warm, Hot)
 
 type Celsius = wrap real
 type Fahrenheit = wrap real
+
+type MaybeInt = enum(Some(int i), None)
 
 def int:addOne(self) -> int {
 	self + 1
@@ -17,13 +19,21 @@ def Celsius:toFahrenheit(self) -> Fahrenheit {
 def Celsius:toState(self) -> WeatherState {
 	let base = self.unwrap()
 	if base < 0. {
-		WeatherState:Freezing
+		WeatherState:Freezing(true)
 	} elif base < 15. {
 		WeatherState:Cold
 	} elif base < 25. {
 		WeatherState:Warm
 	} else {
 		WeatherState:Hot
+	}
+}
+
+def str:from(WeatherState s) -> str {
+	if s.discriminant() == WeatherState:Hot.discriminant() {
+		"Yep"
+	} else {
+		"Nope"
 	}
 }
 

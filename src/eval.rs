@@ -43,10 +43,9 @@ impl EvalContext<'_> {
 				value
 			}
 			GlobalGet(qid) => {
-				// TODO this needs to work for non-symbolconstant stuff
 				let node = self.symtab.root.resolve(&qid).unwrap();
-				let symconst = node.get_symbol_constant().unwrap();
-				Value::Enum(symconst)
+				let (_, value) = node.get_constant().unwrap();
+				value
 			}
 			FunctionCall(_, _) => unreachable!(),
 			FunctionCallResolved(func, arg_exprs) => {

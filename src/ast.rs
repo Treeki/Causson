@@ -30,7 +30,7 @@ pub enum HLExpr {
 // A definition for a new type
 #[derive(Debug, PartialEq)]
 pub enum HLTypeDef {
-	Enum(Vec<Symbol>),
+	Enum(Vec<(Symbol, Vec<(QualID, Symbol)>)>),
 	Wrap(QualID),
 	Record(Vec<(QualID, Symbol)>)
 }
@@ -90,7 +90,7 @@ impl Type {
 #[derive(Debug)]
 pub enum TypeBody {
 	Incomplete,
-	Enum,
+	Enum(Vec<(Symbol, Vec<(Type, Symbol)>)>),
 	Primitive(PrimitiveType),
 	Wrapper(Type),
 	Record(Vec<(Type, Symbol)>)
@@ -230,7 +230,7 @@ pub enum SymTabNode {
 	Namespace { children: HashMap<Symbol, SymTabNode> },
 	Type { typ: Type, children: HashMap<Symbol, SymTabNode> },
 	Function { variants: Vec<Function> },
-	SymbolConstant(Symbol)
+	Constant { typ: Type, value: Value }
 }
 
 impl SymTabNode {
@@ -243,8 +243,8 @@ impl SymTabNode {
 	pub fn new_function() -> SymTabNode {
 		SymTabNode::Function { variants: vec![] }
 	}
-	pub fn new_symbol_constant(sym: Symbol) -> SymTabNode {
-		SymTabNode::SymbolConstant(sym)
+	pub fn new_constant(typ: Type, value: Value) -> SymTabNode {
+		SymTabNode::Constant { typ, value }
 	}
 
 	pub fn get_children(&self) -> Option<&HashMap<Symbol, SymTabNode>> {
@@ -270,9 +270,9 @@ impl SymTabNode {
 		}
 	}
 
-	pub fn get_symbol_constant(&self) -> Option<Symbol> {
+	pub fn get_constant(&self) -> Option<(Type, Value)> {
 		match self {
-			SymTabNode::SymbolConstant(sym) => Some(*sym),
+			SymTabNode::Constant { typ, value, .. } => Some((typ.clone(), value.clone())),
 			_ => None
 		}
 	}

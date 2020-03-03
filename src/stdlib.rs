@@ -2,6 +2,7 @@ use crate::ast::*;
 use crate::data::*;
 use crate::eval::*;
 use symbol::Symbol;
+use std::convert::TryInto;
 use gtk::prelude::*;
 
 impl SymbolTable {
@@ -140,9 +141,15 @@ pub fn inject_wrap_type(symtab: &mut SymbolTable, wrap_type: Type, target_type: 
 	Ok(())
 }
 
-pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type) -> Result<(), SymTabError> {
-	symtab.add_binary_bool(typ.clone(), "op#==", move |_, args| Value::Bool(args[0].unchecked_enum_symbol() == args[1].unchecked_enum_symbol()))?;
-	symtab.add_binary_bool(typ.clone(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_enum_symbol() != args[1].unchecked_enum_symbol()))?;
+pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -> Result<(), SymTabError> {
+	symtab.add_builtin_method(
+		&typ, "discriminant", &symtab.int_type.clone(), &[],
+		move |_, args| { Value::Int(args[0].unchecked_enum_index().try_into().unwrap()) }
+	)?;
+	if !has_fields {
+		symtab.add_binary_bool(typ.clone(), "op#==", move |_, args| Value::Bool(args[0].unchecked_enum_index() == args[1].unchecked_enum_index()))?;
+		symtab.add_binary_bool(typ.clone(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_enum_index() != args[1].unchecked_enum_index()))?;
+	}
 	Ok(())
 }
 

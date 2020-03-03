@@ -54,7 +54,7 @@ pub enum Value {
 	Bool(bool),
 	Int(i64),
 	Real(f64),
-	Enum(Symbol),
+	Enum(usize, Vec<Value>),
 	Obj(NonNull<GCNode<Obj>>)
 }
 
@@ -77,9 +77,9 @@ impl Value {
 			_ => panic!("Real value expected")
 		}
 	}
-	pub fn unchecked_enum_symbol(&self) -> Symbol {
+	pub fn unchecked_enum_index(&self) -> usize {
 		match self {
-			Value::Enum(sym) => *sym,
+			Value::Enum(idx, _) => *idx,
 			_ => panic!("Enum value expected")
 		}
 	}

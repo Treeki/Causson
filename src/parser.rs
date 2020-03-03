@@ -1,5 +1,6 @@
 use symbol::Symbol;
 use crate::ast::*;
+use crate::data::*;
 use crate::stdlib;
 
 lazy_static! {
@@ -80,12 +81,36 @@ impl ParseContext {
 				stdlib::inject_wrap_type(&mut self.symtab, typ, target_type)?;
 				Ok(())
 			}
-			HLTypeDef::Enum(ids) => {
-				*typ.borrow_mut() = TypeBody::Enum;
-				for id in ids {
-					node.get_children_mut().unwrap().insert(*id, SymTabNode::new_symbol_constant(*id));
+			HLTypeDef::Enum(values) => {
+				let mut res_values = vec![];
+				for (val_id, fields) in values {
+					let fields = fields.iter().map(
+						|(tref, field_id)|
+						self.symtab.root
+							.resolve(tref)
+							.and_then(SymTabNode::get_type)
+							.ok_or(ParserError::TypeIsMissing)
+							.map(|t| (t, field_id.clone()))
+					).collect::<Result<Vec<(Type, Symbol)>>>()?;
+					res_values.push((val_id.clone(), fields));
 				}
-				stdlib::inject_enum_type(&mut self.symtab, typ)?;
+
+				for (i, (val_id, fields)) in res_values.iter().enumerate() {
+					if fields.is_empty() {
+						// we have to re-select 'node' because the borrow checker is silly
+						let node = self.symtab.root.resolve_mut(name).unwrap();
+						let c = Value::Enum(i, vec![]);
+						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(typ.clone(), c));
+					} else {
+						self.symtab.add_builtin_static_method(
+							&typ, val_id, &typ, &fields,
+							move |_, args| { Value::Enum(i, args.to_vec()) }
+						)?;
+					}
+				}
+				let have_fields = res_values.iter().any(|v| !v.1.is_empty());
+				*typ.borrow_mut() = TypeBody::Enum(res_values);
+				stdlib::inject_enum_type(&mut self.symtab, typ, have_fields)?;
 				Ok(())
 			}
 			HLTypeDef::Record(fields) => {
@@ -340,10 +365,8 @@ impl<'a> CodeParseContext<'a> {
 				let (sym, node_name) = qid.split_last().unwrap();
 				let node = self.parent.symtab.root.resolve(node_name).ok_or(ParserError::MissingNamespace)?;
 				let const_node = node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
-				let _const_sym = const_node.get_symbol_constant().ok_or(ParserError::ConstantNotFound)?;
+				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound)?;
 
-				// will probably want to change this to store the type in the const_node
-				let typ = node.get_type().ok_or(ParserError::MissingNamespace)?;
 				Ok(Expr { expr: GlobalGet(qid.clone()), typ })
 			}
 			FunctionCall(qid, args) => {

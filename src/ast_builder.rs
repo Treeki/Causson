@@ -123,7 +123,7 @@ fn parse_type_def(pair: Pair) -> HLTypeDef {
 	match pair.as_rule() {
 		Rule::wrapDef => HLTypeDef::Wrap(parse_qualified_id(pair.into_inner().next().unwrap())),
 		Rule::enumDef => {
-			HLTypeDef::Enum(pair.into_inner().map(parse_id).collect())
+			HLTypeDef::Enum(pair.into_inner().map(parse_enum_value).collect())
 		},
 		Rule::recordDef => {
 			let fields = pair.into_inner().map(parse_typed_id).collect();
@@ -131,6 +131,14 @@ fn parse_type_def(pair: Pair) -> HLTypeDef {
 		},
 		_ => unreachable!()
 	}
+}
+
+fn parse_enum_value(pair: Pair) -> (Symbol, Vec<(QualID, Symbol)>) {
+	assert_eq!(pair.as_rule(), Rule::enumValue);
+	let mut pairs = pair.into_inner();
+	let val_id = parse_id(pairs.next().unwrap());
+	let vec: Vec<(QualID, Symbol)> = pairs.map(parse_typed_id).collect();
+	(val_id, vec)
 }
 
 fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<FuncArg>) {
@@ -248,8 +256,12 @@ mod tests {
 	#[test]
 	fn test_enum_type() {
 		let x_qid = vec!["x".into()];
-		let a_b_c_syms = vec!["a".into(), "b".into(), "c".into()];
-		let c = pcc("type x = enum(a,b,c)").unwrap();
+		let a_b_c_syms = vec![
+			("a".into(), vec![]),
+			("b".into(), vec![(vec!["int".into()], "z".into())]),
+			("c".into(), vec![])
+		];
+		let c = pcc("type x = enum(a,b(int z),c)").unwrap();
 		assert_eq!(c, vec![GlobalDef::Type(x_qid, HLTypeDef::Enum(a_b_c_syms))]);
 	}
 
