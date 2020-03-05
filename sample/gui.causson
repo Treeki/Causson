@@ -1,7 +1,14 @@
+type Wind = record {
+	gui:Window wnd
+	gui:Button butt
+}
+
 def main() -> void {
 	gui:init()
-	let wnd = gui:Window:new()
-	wnd.show()
+	let wind = Wind:build(gui:Window:new(), gui:Button:new())
+	wind.butt.label = "Bork!"
+	wind.wnd.add_child(wind.butt)
+	wind.wnd.show()
 	gui:run()
 }
 

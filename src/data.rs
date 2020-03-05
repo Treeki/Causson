@@ -1,6 +1,5 @@
 use std::cell::{Ref, RefMut};
 use std::ptr::NonNull;
-use symbol::Symbol;
 use crate::gc::*;
 
 
@@ -11,6 +10,7 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
+	GuiButton(gtk::Button),
 	GuiWindow(gtk::Window)
 }
 
@@ -37,6 +37,12 @@ impl Obj {
 		match self {
 			Obj::Record(v) => v,
 			_ => panic!("Record heapobj expected")
+		}
+	}
+	pub fn unchecked_gui_button(&self) -> &gtk::Button {
+		match self {
+			Obj::GuiButton(b) => b,
+			_ => panic!("GuiButton heapobj expected")
 		}
 	}
 	pub fn unchecked_gui_window(&self) -> &gtk::Window {

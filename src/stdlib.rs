@@ -115,15 +115,35 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		move |_, _args| { gtk::main(); Value::Void }
 	)?;
 
+	let button = Type::from_body(vec!["gui".into(), "Button".into()], TypeBody::Primitive(PrimitiveType::GuiButton));
+	symtab.add_type(button.clone())?;
+	symtab.add_builtin_static_method(
+		&button, "new", &button, &[],
+		move |_, _args| Obj::GuiButton(gtk::Button::new()).to_heap()
+	)?;
+	symtab.add_builtin_method(
+		&button, "label=", &void_(), &[(str_(), "s".into())],
+		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
+	)?;
+
 	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
 	symtab.add_type(window.clone())?;
-	symtab.add_builtin_function(
-		vec!["gui".into(), "Window".into(), "new".into()], &window, &[],
-		move |_, _args| { Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap() }
+	symtab.add_builtin_static_method(
+		&window, "new", &window, &[],
+		move |_, _args| Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap()
 	)?;
 	symtab.add_builtin_method(
 		&window, "show", &void_(), &[],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_window().show(); Value::Void }
+		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_window().show_all(); Value::Void }
+	)?;
+	symtab.add_builtin_method(
+		&window, "add_child", &void_(), &[(button.clone(), "w".into())],
+		move |_, args| {
+			let window = args[0].borrow_obj().unwrap();
+			let child = args[1].borrow_obj().unwrap();
+			window.unchecked_gui_window().add(child.unchecked_gui_button());
+			Value::Void
+		}
 	)?;
 
 	Ok(())
