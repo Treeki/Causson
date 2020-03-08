@@ -8,6 +8,7 @@ type Wind = record {
 component CompWind {
 	wnd = gui:Window {
 		gui:Box {
+			.spacing = 10
 			butt1 = gui:Button { .label = "Butt1" }
 			butt2 = gui:Button { .label = "Butt2" }
 		}

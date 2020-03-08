@@ -123,7 +123,7 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	)?;
 	symtab.add_builtin_method(
 		&button, "label=", &void_(), &[(str_(), "s".into())],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
+		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
 
 	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
@@ -134,7 +134,7 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	)?;
 	symtab.add_builtin_method(
 		&window, "show", &void_(), &[],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_window().show_all(); Value::Void }
+		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_window().show_all(); Value::Void }
 	)?;
 
 	let boxt = Type::from_body(vec!["gui".into(), "Box".into()], TypeBody::Primitive(PrimitiveType::GuiBox));
@@ -150,6 +150,14 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	symtab.add_builtin_static_method(
 		&boxt, "new_vertical", &boxt, &[(int_(), "spacing".into())],
 		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Vertical, args[0].unchecked_int().try_into().unwrap())).to_heap()
+	)?;
+	symtab.add_builtin_method(
+		&boxt, "spacing=", &int_(), &[],
+		move |_, args| Value::Int(args[0].borrow_obj().unwrap().unchecked_gtk_box().get_spacing().into())
+	)?;
+	symtab.add_builtin_method(
+		&boxt, "spacing=", &void_(), &[(int_(), "spacing".into())],
+		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_box().set_spacing(args[1].unchecked_int().try_into().unwrap()); Value::Void }
 	)?;
 
 	let container_parents = vec![window.clone(), boxt.clone()];

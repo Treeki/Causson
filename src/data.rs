@@ -41,13 +41,13 @@ impl Obj {
 			_ => panic!("Record heapobj expected")
 		}
 	}
-	pub fn unchecked_gui_button(&self) -> &gtk::Button {
+	pub fn unchecked_gtk_button(&self) -> &gtk::Button {
 		match self {
 			Obj::GuiButton(b) => b,
 			_ => panic!("GuiButton heapobj expected")
 		}
 	}
-	pub fn unchecked_gui_window(&self) -> &gtk::Window {
+	pub fn unchecked_gtk_window(&self) -> &gtk::Window {
 		match self {
 			Obj::GuiWindow(w) => w,
 			_ => panic!("GuiWindow heapobj expected")
@@ -59,6 +59,13 @@ impl Obj {
 			Obj::GuiBox(b) => b.upcast_ref(),
 			Obj::GuiWindow(w) => w.upcast_ref(),
 			_ => panic!("gtk::Container heapobj expected")
+		}
+	}
+
+	pub fn unchecked_gtk_box(&self) -> &gtk::Box {
+		match self {
+			Obj::GuiBox(b) => b,
+			_ => panic!("gtk::Box heapobj expected")
 		}
 	}
 
