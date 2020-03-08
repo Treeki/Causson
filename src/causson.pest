@@ -55,10 +55,11 @@ gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
   funcSpec = {qualifiedID ~ (("(" ~ funcSelfArg? ~ ")") | ("(" ~ (funcSelfArg ~ ",")? ~ (typedID ~ ",")* ~ typedID ~ ")"))}
     funcSelfArg = {"self"}
 
-//gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ "}"}
-//  compSubDef = _{compFieldDef | compInstance | compMethodDef | compPropertySet}
+gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}"}
+  compSubDef = _{compInstance}
+    compInstance = {(id ~ "=")? ~ qualifiedID ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
 
-globalDef = {gTypeDef | gFuncDef}
+globalDef = {gTypeDef | gFuncDef | gComponentDef}
 
 //program = _{ SOI ~ NEWLINE* ~ (globalDef ~ NEWLINE+)* ~ EOI }
 program = _{ SOI ~ NEWLINE* ~ (globalDef ~ NEWLINE+)* ~ globalDef? ~ EOI }

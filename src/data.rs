@@ -1,6 +1,7 @@
 use std::cell::{Ref, RefMut};
 use std::ptr::NonNull;
 use crate::gc::*;
+use crate::gtk::prelude::Cast;
 
 
 thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
@@ -10,6 +11,7 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
+	GuiBox(gtk::Box),
 	GuiButton(gtk::Button),
 	GuiWindow(gtk::Window)
 }
@@ -49,6 +51,23 @@ impl Obj {
 		match self {
 			Obj::GuiWindow(w) => w,
 			_ => panic!("GuiWindow heapobj expected")
+		}
+	}
+
+	pub fn unchecked_gtk_container(&self) -> &gtk::Container {
+		match self {
+			Obj::GuiBox(b) => b.upcast_ref(),
+			Obj::GuiWindow(w) => w.upcast_ref(),
+			_ => panic!("gtk::Container heapobj expected")
+		}
+	}
+
+	pub fn unchecked_gtk_widget(&self) -> &gtk::Widget {
+		match self {
+			Obj::GuiBox(b) => b.upcast_ref(),
+			Obj::GuiButton(b) => b.upcast_ref(),
+			Obj::GuiWindow(w) => w.upcast_ref(),
+			_ => panic!("gtk::Widget heapobj expected")
 		}
 	}
 }

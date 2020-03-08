@@ -165,6 +165,22 @@ fn parse_typed_id(pair: Pair) -> (QualID, Symbol) {
 	(parse_qualified_id(typeref), parse_id(id))
 }
 
+fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
+	match pair.as_rule() {
+		Rule::compInstance => {
+			let mut pairs = pair.into_inner();
+			let name = match pairs.peek().unwrap().as_rule() {
+				Rule::id => Some(parse_id(pairs.next().unwrap())),
+				_ => None
+			};
+			let what = parse_qualified_id(pairs.next().unwrap());
+			let children = pairs.map(parse_comp_subdef).collect();
+			HLCompSubDef::Instance(HLCompInstance { name, what, children })
+		},
+		_ => panic!("unknown component subdef type {:?}", pair)
+	}
+}
+
 fn parse_global_def(pair: Pair) -> GlobalDef {
 	match pair.as_rule() {
 		Rule::gTypeDef => {
@@ -180,6 +196,12 @@ fn parse_global_def(pair: Pair) -> GlobalDef {
 			let code = pairs.next().unwrap();
 			let (func_name, func_type, args) = parse_func_spec(spec);
 			GlobalDef::Func(func_name, func_type, args, parse_qualified_id(ret_type), parse_code_block(code))
+		},
+		Rule::gComponentDef => {
+			let mut pairs = pair.into_inner();
+			let qual_id = pairs.next().unwrap();
+			let subdefs = pairs.map(parse_comp_subdef).collect();
+			GlobalDef::Component(parse_qualified_id(qual_id), subdefs)
 		},
 		_ => panic!("unknown global def type {:?}", pair)
 	}
@@ -461,6 +483,41 @@ mod tests {
 		assert_expr("a(1, 2)", Call(box_qid("a"), vec![Int(Ok(1)), Int(Ok(2))]));
 		assert_expr("a.b(1, 2)", Call(Box::new(PropAccess(box_qid("a"), "b".into())), vec![Int(Ok(1)), Int(Ok(2))]));
 		assert_expr("a().b", PropAccess(Box::new(Call(box_qid("a"), vec![])), "b".into()));
+	}
+
+	#[test]
+	fn test_component() {
+		let c = pcc("component xyz {}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![])]);
+
+		let c = pcc("component xyz {x = Gui:Window}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+			HLCompSubDef::Instance(HLCompInstance {
+				name: Some("x".into()),
+				what: vec!["Gui".into(), "Window".into()],
+				children: vec![]
+			})
+		])]);
+
+		let c = pcc("component xyz {Gui:Window { y = Gui:Button \n Gui:Dummy }}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+			HLCompSubDef::Instance(HLCompInstance {
+				name: None,
+				what: vec!["Gui".into(), "Window".into()],
+				children: vec![
+					HLCompSubDef::Instance(HLCompInstance {
+						name: Some("y".into()),
+						what: vec!["Gui".into(), "Button".into()],
+						children: vec![]
+					}),
+					HLCompSubDef::Instance(HLCompInstance {
+						name: None,
+						what: vec!["Gui".into(), "Dummy".into()],
+						children: vec![]
+					})
+				]
+			})
+		])]);
 	}
 }
 

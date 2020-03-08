@@ -67,6 +67,89 @@ impl ParseContext {
 		ParseContext { symtab: SymbolTable::new() }
 	}
 
+	#[allow(irrefutable_let_patterns)]
+	fn preprocess_components(&self, program: &Program) -> Result<Program> {
+		let mut extra_defs = vec![];
+		for def in program {
+			if let GlobalDef::Component(comp_id, subdefs) = def {
+				fn grab_instances<'a>(instances: &mut Vec<&'a HLCompInstance>, subdef: &'a HLCompSubDef) {
+					if let HLCompSubDef::Instance(instance) = &subdef {
+						instances.push(instance);
+						for c in &instance.children {
+							grab_instances(instances, c)
+						}
+					}
+				}
+
+				let mut instances = vec![];
+				for subdef in subdefs {
+					grab_instances(&mut instances, &subdef);
+				}
+
+				// First step, create a record with all the stuff we need
+				let mut rec_fields = vec![];
+				for instance in &instances {
+					if let Some(field_name) = instance.name {
+						rec_fields.push((instance.what.clone(), field_name));
+					}
+				}
+				extra_defs.push(GlobalDef::Type(comp_id.clone(), HLTypeDef::Record(rec_fields)));
+
+				// Now, create a new function
+				let mut new_frag = vec![];
+				let mut instance_lvar_ids: Vec<Symbol> = vec![];
+
+				for (index, instance) in instances.iter().enumerate() {
+					let instance_id = format!("f_{}", index).into();
+					let mut instance_new_qid = instance.what.clone();
+					instance_new_qid.push("new".into());
+					let instance_new_expr = HLExpr::ID(instance_new_qid);
+					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), vec![]);
+					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
+					instance_lvar_ids.push(instance_id);
+				}
+
+				// Assemble the hierarchy
+				// This requires care, to keep the IDs in sync
+				for (index, instance) in instances.iter().enumerate() {
+					let mut sub_index = index + 1;
+					for subdef in &instance.children {
+						if let HLCompSubDef::Instance(_sub_instance) = &subdef {
+							let parent_expr = HLExpr::ID(vec![instance_lvar_ids[index]]);
+							let child_expr = HLExpr::ID(vec![instance_lvar_ids[sub_index]]);
+							let add_expr = HLExpr::PropAccess(Box::new(parent_expr), "add_child".into());
+							new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
+							sub_index += 1;
+						}
+					}
+				}
+
+				// Build the record containing all named fields
+				let mut named_field_id_exprs = vec![];
+				for (instance, lvar_id) in instances.iter().zip(instance_lvar_ids) {
+					if instance.name.is_some() {
+						named_field_id_exprs.push(HLExpr::ID(vec![lvar_id]));
+					}
+				}
+				let mut build_qid = comp_id.clone();
+				build_qid.push("build".into());
+				new_frag.push(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), named_field_id_exprs));
+
+				let mut new_qid = comp_id.clone();
+				new_qid.push("new".into());
+				extra_defs.push(GlobalDef::Func(
+					new_qid,
+					FuncType::Function,
+					vec![],
+					comp_id.clone(),
+					HLExpr::CodeBlock(new_frag)
+				));
+			}
+		}
+		println!("{:?}", extra_defs);
+		Ok(extra_defs)
+	}
+
 	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &HLTypeDef) -> Result<()> {
 		let node = self.symtab.root.resolve_mut(name).expect("incomplete type should exist!");
 		let mut typ = node.get_type().expect("incomplete type should be a type");
@@ -129,13 +212,15 @@ impl ParseContext {
 		}
 	}
 
-	fn collect_types(&mut self, prog: &Program) -> Result<()> {
+	fn collect_types(&mut self, prog: &Program, extra_defs: &Program) -> Result<()> {
 		let mut typedefs: Vec<&GlobalDef> = vec![];
 
-		for def in prog {
-			if let GlobalDef::Type(name, _) = def {
-				self.symtab.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
-				typedefs.push(&def);
+		for p in [prog, extra_defs].iter() {
+			for def in p.iter() {
+				if let GlobalDef::Type(name, _) = def {
+					self.symtab.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
+					typedefs.push(&def);
+				}
 			}
 		}
 
@@ -432,9 +517,12 @@ impl<'a> CodeParseContext<'a> {
 
 pub fn make_symtab_from_program(prog: &Program) -> Result<SymbolTable> {
 	let mut ctx = ParseContext::new();
-	ctx.collect_types(prog)?;
+	let new_defs = ctx.preprocess_components(prog)?;
+	ctx.collect_types(prog, &new_defs)?;
 	ctx.collect_function_specs(prog)?;
+	ctx.collect_function_specs(&new_defs)?;
 	ctx.collect_function_bodies(prog)?;
+	ctx.collect_function_bodies(&new_defs)?;
 	Ok(ctx.symtab)
 }
 

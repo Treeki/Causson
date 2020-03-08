@@ -136,15 +136,33 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		&window, "show", &void_(), &[],
 		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gui_window().show_all(); Value::Void }
 	)?;
-	symtab.add_builtin_method(
-		&window, "add_child", &void_(), &[(button.clone(), "w".into())],
-		move |_, args| {
-			let window = args[0].borrow_obj().unwrap();
-			let child = args[1].borrow_obj().unwrap();
-			window.unchecked_gui_window().add(child.unchecked_gui_button());
-			Value::Void
-		}
+
+	let boxt = Type::from_body(vec!["gui".into(), "Box".into()], TypeBody::Primitive(PrimitiveType::GuiBox));
+	symtab.add_type(boxt.clone())?;
+	symtab.add_builtin_static_method(
+		&boxt, "new_horizontal", &boxt, &[(int_(), "spacing".into())],
+		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Horizontal, args[0].unchecked_int().try_into().unwrap())).to_heap()
 	)?;
+	symtab.add_builtin_static_method(
+		&boxt, "new_vertical", &boxt, &[(int_(), "spacing".into())],
+		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Vertical, args[0].unchecked_int().try_into().unwrap())).to_heap()
+	)?;
+
+	let container_parents = vec![window.clone(), boxt.clone()];
+	let container_children = vec![boxt.clone(), button.clone()];
+	for parent in &container_parents {
+		for child in &container_children {
+			symtab.add_builtin_method(
+				&parent, "add_child", &void_(), &[(child.clone(), "child".into())],
+				move |_, args| {
+					let parent_obj = args[0].borrow_obj().unwrap();
+					let child_obj = args[1].borrow_obj().unwrap();
+					parent_obj.unchecked_gtk_container().add(child_obj.unchecked_gtk_widget());
+					Value::Void
+				}
+			)?;
+		}
+	}
 
 	Ok(())
 }

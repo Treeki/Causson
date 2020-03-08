@@ -1,13 +1,26 @@
 type Wind = record {
 	gui:Window wnd
-	gui:Button butt
+	gui:Box boxxo
+	gui:Button butt1
+	gui:Button butt2
+}
+
+component CompWind {
+	wnd = gui:Window {
+		butt = gui:Button
+	}
 }
 
 def main() -> void {
 	gui:init()
-	let wind = Wind:build(gui:Window:new(), gui:Button:new())
-	wind.butt.label = "Bork!"
-	wind.wnd.add_child(wind.butt)
+	--let wind = Wind:build(gui:Window:new(), gui:Box:new_horizontal(10), gui:Button:new(), gui:Button:new())
+	--wind.butt1.label = "Bork!"
+	--wind.butt2.label = "Bork!"
+	--wind.boxxo.add_child(wind.butt1)
+	--wind.boxxo.add_child(wind.butt2)
+	--wind.wnd.add_child(wind.boxxo)
+	--wind.wnd.show()
+	let wind = CompWind:new()
 	wind.wnd.show()
 	gui:run()
 }

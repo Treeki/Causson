@@ -44,9 +44,22 @@ pub enum FuncType {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct HLCompInstance {
+	pub name: Option<Symbol>,
+	pub what: QualID,
+	pub children: Vec<HLCompSubDef>
+}
+
+#[derive(Debug, PartialEq)]
+pub enum HLCompSubDef {
+	Instance(HLCompInstance)
+}
+
+#[derive(Debug, PartialEq)]
 pub enum GlobalDef {
 	Type(QualID, HLTypeDef),
-	Func(QualID, FuncType, Vec<FuncArg>, QualID, HLExpr)
+	Func(QualID, FuncType, Vec<FuncArg>, QualID, HLExpr),
+	Component(QualID, Vec<HLCompSubDef>)
 }
 
 pub type Program = Vec<GlobalDef>;
@@ -58,7 +71,8 @@ pub type Program = Vec<GlobalDef>;
 // TODO: Rename to BuiltinType or even remove?
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
-	Void, Bool, Int, Real, Str, GuiButton, GuiWindow
+	Void, Bool, Int, Real, Str,
+	GuiBox, GuiButton, GuiWindow
 }
 
 
