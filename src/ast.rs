@@ -47,6 +47,7 @@ pub enum FuncType {
 pub struct HLCompInstance {
 	pub name: Option<Symbol>,
 	pub what: QualID,
+	pub new_args: Vec<HLExpr>,
 	pub children: Vec<HLCompSubDef>
 }
 

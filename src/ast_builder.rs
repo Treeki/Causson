@@ -174,8 +174,14 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 				_ => None
 			};
 			let what = parse_qualified_id(pairs.next().unwrap());
+			let new_args = match pairs.peek() {
+				Some(r) if r.as_rule() == Rule::compInstanceArgs => {
+					pairs.next().unwrap().into_inner().map(parse_hlexpr).collect()
+				}
+				_ => vec![]
+			};
 			let children = pairs.map(parse_comp_subdef).collect();
-			HLCompSubDef::Instance(HLCompInstance { name, what, children })
+			HLCompSubDef::Instance(HLCompInstance { name, what, new_args, children })
 		},
 		Rule::compPropSet => {
 			let mut pairs = pair.into_inner();
@@ -501,24 +507,28 @@ mod tests {
 			HLCompSubDef::Instance(HLCompInstance {
 				name: Some("x".into()),
 				what: vec!["Gui".into(), "Window".into()],
+				new_args: vec![],
 				children: vec![]
 			})
 		])]);
 
-		let c = pcc("component xyz {Gui:Window { y = Gui:Button \n Gui:Dummy }}").unwrap();
+		let c = pcc("component xyz {Gui:Window(5) { y = Gui:Button \n Gui:Dummy }}").unwrap();
 		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: None,
 				what: vec!["Gui".into(), "Window".into()],
+				new_args: vec![HLExpr::Int(Ok(5))],
 				children: vec![
 					HLCompSubDef::Instance(HLCompInstance {
 						name: Some("y".into()),
 						what: vec!["Gui".into(), "Button".into()],
+						new_args: vec![],
 						children: vec![]
 					}),
 					HLCompSubDef::Instance(HLCompInstance {
 						name: None,
 						what: vec!["Gui".into(), "Dummy".into()],
+						new_args: vec![],
 						children: vec![]
 					})
 				]
@@ -530,6 +540,7 @@ mod tests {
 			HLCompSubDef::Instance(HLCompInstance {
 				name: Some("x".into()),
 				what: vec!["Gui".into(), "Window".into()],
+				new_args: vec![],
 				children: vec![
 					HLCompSubDef::PropertySet("title".into(), HLExpr::Str("beep".to_string()))
 				]

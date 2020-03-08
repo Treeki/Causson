@@ -58,7 +58,8 @@ gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
 gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}"}
   compSubDef = _{compPropSet | compInstance}
     compPropSet = {"." ~ id ~ "=" ~ expr}
-    compInstance = {(id ~ "=")? ~ qualifiedID ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
+    compInstance = {(id ~ "=")? ~ qualifiedID ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
+      compInstanceArgs = {"(" ~ (expr ~ ",")* ~ expr? ~ ")"}
 
 globalDef = {gTypeDef | gFuncDef | gComponentDef}
 

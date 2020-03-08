@@ -104,7 +104,7 @@ impl ParseContext {
 					let mut instance_new_qid = instance.what.clone();
 					instance_new_qid.push("new".into());
 					let instance_new_expr = HLExpr::ID(instance_new_qid);
-					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), vec![]);
+					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), instance.new_args.clone());
 					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
 				}
 

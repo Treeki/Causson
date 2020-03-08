@@ -115,6 +115,20 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		move |_, _args| { gtk::main(); Value::Void }
 	)?;
 
+	// TODO make it easier to build enums from here...
+	let orientation = Type::from_body(
+		vec!["gui".into(), "Orientation".into()],
+		TypeBody::Enum(vec![
+			("Horizontal".into(), vec![]),
+			("Vertical".into(), vec![]),
+		])
+	);
+	symtab.add_type(orientation.clone())?;
+	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
+	orientation_c.insert("Horizontal".into(), SymTabNode::new_constant(orientation.clone(), Value::Enum(0, vec![])));
+	orientation_c.insert("Vertical".into(), SymTabNode::new_constant(orientation.clone(), Value::Enum(1, vec![])));
+	inject_enum_type(symtab, orientation.clone(), false)?;
+
 	let button = Type::from_body(vec!["gui".into(), "Button".into()], TypeBody::Primitive(PrimitiveType::GuiButton));
 	symtab.add_type(button.clone())?;
 	symtab.add_builtin_static_method(
@@ -140,16 +154,15 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	let boxt = Type::from_body(vec!["gui".into(), "Box".into()], TypeBody::Primitive(PrimitiveType::GuiBox));
 	symtab.add_type(boxt.clone())?;
 	symtab.add_builtin_static_method(
-		&boxt, "new", &boxt, &[],
-		move |_, _args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Horizontal, 0)).to_heap()
-	)?;
-	symtab.add_builtin_static_method(
-		&boxt, "new_horizontal", &boxt, &[(int_(), "spacing".into())],
-		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Horizontal, args[0].unchecked_int().try_into().unwrap())).to_heap()
-	)?;
-	symtab.add_builtin_static_method(
-		&boxt, "new_vertical", &boxt, &[(int_(), "spacing".into())],
-		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Vertical, args[0].unchecked_int().try_into().unwrap())).to_heap()
+		&boxt, "new", &boxt, &[(orientation.clone(), "orientation".into())],
+		move |_, args| {
+			let orient = match args[0].unchecked_enum_index() {
+				0 => gtk::Orientation::Horizontal,
+				1 => gtk::Orientation::Vertical,
+				_ => panic!("unknown Orientation")
+			};
+			Obj::GuiBox(gtk::Box::new(orient, 0)).to_heap()
+		}
 	)?;
 	symtab.add_builtin_method(
 		&boxt, "spacing=", &int_(), &[],
