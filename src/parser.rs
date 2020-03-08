@@ -100,7 +100,7 @@ impl ParseContext {
 				let mut instance_lvar_ids: Vec<Symbol> = vec![];
 
 				for (index, instance) in instances.iter().enumerate() {
-					let instance_id = format!("f_{}", index).into();
+					let instance_id = format!("_f_{}", index).into();
 					let mut instance_new_qid = instance.what.clone();
 					instance_new_qid.push("new".into());
 					let instance_new_expr = HLExpr::ID(instance_new_qid);
@@ -124,16 +124,11 @@ impl ParseContext {
 					}
 				}
 
-				// Build the record containing all named fields
-				let mut named_field_id_exprs = vec![];
-				for (instance, lvar_id) in instances.iter().zip(instance_lvar_ids) {
-					if instance.name.is_some() {
-						named_field_id_exprs.push(HLExpr::ID(vec![lvar_id]));
-					}
-				}
+				// Build the record containing all fields
 				let mut build_qid = comp_id.clone();
 				build_qid.push("build".into());
-				new_frag.push(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), named_field_id_exprs));
+				let field_id_exprs = instance_lvar_ids.iter().map(|i| HLExpr::ID(vec![*i])).collect();
+				new_frag.push(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs));
 
 				let mut new_qid = comp_id.clone();
 				new_qid.push("new".into());
