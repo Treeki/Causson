@@ -177,6 +177,12 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			let children = pairs.map(parse_comp_subdef).collect();
 			HLCompSubDef::Instance(HLCompInstance { name, what, children })
 		},
+		Rule::compPropSet => {
+			let mut pairs = pair.into_inner();
+			let id = parse_id(pairs.next().unwrap());
+			let expr = parse_hlexpr(pairs.next().unwrap());
+			HLCompSubDef::PropertySet(id, expr)
+		},
 		_ => panic!("unknown component subdef type {:?}", pair)
 	}
 }
@@ -515,6 +521,17 @@ mod tests {
 						what: vec!["Gui".into(), "Dummy".into()],
 						children: vec![]
 					})
+				]
+			})
+		])]);
+
+		let c = pcc("component xyz {x = Gui:Window { .title = \"beep\" }}").unwrap();
+		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+			HLCompSubDef::Instance(HLCompInstance {
+				name: Some("x".into()),
+				what: vec!["Gui".into(), "Window".into()],
+				children: vec![
+					HLCompSubDef::PropertySet("title".into(), HLExpr::Str("beep".to_string()))
 				]
 			})
 		])]);

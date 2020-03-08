@@ -140,6 +140,10 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	let boxt = Type::from_body(vec!["gui".into(), "Box".into()], TypeBody::Primitive(PrimitiveType::GuiBox));
 	symtab.add_type(boxt.clone())?;
 	symtab.add_builtin_static_method(
+		&boxt, "new", &boxt, &[],
+		move |_, _args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Horizontal, 0)).to_heap()
+	)?;
+	symtab.add_builtin_static_method(
 		&boxt, "new_horizontal", &boxt, &[(int_(), "spacing".into())],
 		move |_, args| Obj::GuiBox(gtk::Box::new(gtk::Orientation::Horizontal, args[0].unchecked_int().try_into().unwrap())).to_heap()
 	)?;

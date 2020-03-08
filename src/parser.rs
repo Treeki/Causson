@@ -67,7 +67,6 @@ impl ParseContext {
 		ParseContext { symtab: SymbolTable::new() }
 	}
 
-	#[allow(irrefutable_let_patterns)]
 	fn preprocess_components(&self, program: &Program) -> Result<Program> {
 		let mut extra_defs = vec![];
 		for def in program {
@@ -86,40 +85,59 @@ impl ParseContext {
 					grab_instances(&mut instances, &subdef);
 				}
 
-				// First step, create a record with all the stuff we need
-				let mut rec_fields = vec![];
-				for instance in &instances {
-					if let Some(field_name) = instance.name {
-						rec_fields.push((instance.what.clone(), field_name));
-					}
-				}
-				extra_defs.push(GlobalDef::Type(comp_id.clone(), HLTypeDef::Record(rec_fields)));
-
-				// Now, create a new function
+				// First step, create all the stuff we need
+				let mut instance_ids: Vec<Symbol> = vec![];
+				let mut record_fields = vec![];
 				let mut new_frag = vec![];
-				let mut instance_lvar_ids: Vec<Symbol> = vec![];
 
 				for (index, instance) in instances.iter().enumerate() {
-					let instance_id = format!("_f_{}", index).into();
+					let instance_id = match instance.name {
+						Some(field_name) => field_name,
+						None => format!("_f_{}", index).into()
+					};
+					instance_ids.push(instance_id);
+
+					// Add a new field to the record
+					record_fields.push((instance.what.clone(), instance_id));
+
+					// Initialise this in our 'new' function
 					let mut instance_new_qid = instance.what.clone();
 					instance_new_qid.push("new".into());
 					let instance_new_expr = HLExpr::ID(instance_new_qid);
 					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), vec![]);
 					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
-					instance_lvar_ids.push(instance_id);
 				}
 
 				// Assemble the hierarchy
 				// This requires care, to keep the IDs in sync
+				fn get_instance_weight(instance: &HLCompInstance) -> usize {
+					let mut total = 1;
+					for subdef in &instance.children {
+						if let HLCompSubDef::Instance(sub_instance) = subdef {
+							total += get_instance_weight(sub_instance);
+						}
+					}
+					total
+				}
+
 				for (index, instance) in instances.iter().enumerate() {
 					let mut sub_index = index + 1;
 					for subdef in &instance.children {
-						if let HLCompSubDef::Instance(_sub_instance) = &subdef {
-							let parent_expr = HLExpr::ID(vec![instance_lvar_ids[index]]);
-							let child_expr = HLExpr::ID(vec![instance_lvar_ids[sub_index]]);
-							let add_expr = HLExpr::PropAccess(Box::new(parent_expr), "add_child".into());
-							new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
-							sub_index += 1;
+						match subdef {
+							HLCompSubDef::Instance(_sub_instance) => {
+								let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
+								let child_expr = HLExpr::ID(vec![instance_ids[sub_index]]);
+								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), "add_child".into());
+								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
+								sub_index += get_instance_weight(_sub_instance);
+							},
+							HLCompSubDef::PropertySet(prop_id, value_expr) => {
+								// TODO: dynamic properties
+								let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
+								let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
+								let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
+								new_frag.push(set_expr);
+							}
 						}
 					}
 				}
@@ -127,11 +145,16 @@ impl ParseContext {
 				// Build the record containing all fields
 				let mut build_qid = comp_id.clone();
 				build_qid.push("build".into());
-				let field_id_exprs = instance_lvar_ids.iter().map(|i| HLExpr::ID(vec![*i])).collect();
+				let field_id_exprs = instance_ids.iter().map(|i| HLExpr::ID(vec![*i])).collect();
 				new_frag.push(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs));
 
 				let mut new_qid = comp_id.clone();
 				new_qid.push("new".into());
+
+				extra_defs.push(GlobalDef::Type(
+					comp_id.clone(),
+					HLTypeDef::Record(record_fields)
+				));
 				extra_defs.push(GlobalDef::Func(
 					new_qid,
 					FuncType::Function,

@@ -52,7 +52,8 @@ pub struct HLCompInstance {
 
 #[derive(Debug, PartialEq)]
 pub enum HLCompSubDef {
-	Instance(HLCompInstance)
+	Instance(HLCompInstance),
+	PropertySet(Symbol, HLExpr)
 }
 
 #[derive(Debug, PartialEq)]
