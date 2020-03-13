@@ -6,14 +6,14 @@ use std::convert::TryInto;
 use gtk::prelude::*;
 
 impl SymbolTable {
-	fn add_binary<F: Fn(&SymbolTable, &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
+	fn add_binary<F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
 			&typ, name,
 			&typ, &[(typ.clone(), "v".into())],
 			f
 		)
 	}
-	fn add_binary_bool<F: Fn(&SymbolTable, &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
+	fn add_binary_bool<F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
 			&typ, name,
 			&self.bool_type.clone(), &[(typ.clone(), "v".into())],
@@ -21,7 +21,7 @@ impl SymbolTable {
 		)
 	}
 	fn add_default<F: Fn(&SymbolTable) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
-		self.add_builtin_static_method(&typ, "default", &typ, &[], move |s, _| f(s))
+		self.add_builtin_static_method(&typ, "default", &typ, &[], move |s, _, _| f(s))
 	}
 }
 
@@ -36,35 +36,37 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	let bool_ = || { bool_.clone() };
 	let str_ = symtab.str_type.clone();
 	let str_ = || { str_.clone() };
+	let any_ = symtab.any_type.clone();
+	let any_ = || { any_.clone() };
 
-	symtab.add_binary_bool(bool_(), "op#==", move |_, args| Value::Bool(args[0].unchecked_bool() == args[1].unchecked_bool()))?;
-	symtab.add_binary_bool(bool_(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_bool() != args[1].unchecked_bool()))?;
+	symtab.add_binary_bool(bool_(), "op#==", move |_, _, args| Value::Bool(args[0].unchecked_bool() == args[1].unchecked_bool()))?;
+	symtab.add_binary_bool(bool_(), "op#!=", move |_, _, args| Value::Bool(args[0].unchecked_bool() != args[1].unchecked_bool()))?;
 
-	symtab.add_binary(int_(), "op#+", move |_, args| Value::Int(args[0].unchecked_int() + args[1].unchecked_int()))?;
-	symtab.add_binary(int_(), "op#-", move |_, args| Value::Int(args[0].unchecked_int() - args[1].unchecked_int()))?;
-	symtab.add_binary(int_(), "op#*", move |_, args| Value::Int(args[0].unchecked_int() * args[1].unchecked_int()))?;
-	symtab.add_binary(int_(), "op#/", move |_, args| Value::Int(args[0].unchecked_int() / args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#==", move |_, args| Value::Bool(args[0].unchecked_int() == args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_int() != args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#<", move |_, args| Value::Bool(args[0].unchecked_int() < args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#<=", move |_, args| Value::Bool(args[0].unchecked_int() <= args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#>", move |_, args| Value::Bool(args[0].unchecked_int() > args[1].unchecked_int()))?;
-	symtab.add_binary_bool(int_(), "op#>=", move |_, args| Value::Bool(args[0].unchecked_int() >= args[1].unchecked_int()))?;
+	symtab.add_binary(int_(), "op#+", move |_, _, args| Value::Int(args[0].unchecked_int() + args[1].unchecked_int()))?;
+	symtab.add_binary(int_(), "op#-", move |_, _, args| Value::Int(args[0].unchecked_int() - args[1].unchecked_int()))?;
+	symtab.add_binary(int_(), "op#*", move |_, _, args| Value::Int(args[0].unchecked_int() * args[1].unchecked_int()))?;
+	symtab.add_binary(int_(), "op#/", move |_, _, args| Value::Int(args[0].unchecked_int() / args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#==", move |_, _, args| Value::Bool(args[0].unchecked_int() == args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#!=", move |_, _, args| Value::Bool(args[0].unchecked_int() != args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#<", move |_, _, args| Value::Bool(args[0].unchecked_int() < args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#<=", move |_, _, args| Value::Bool(args[0].unchecked_int() <= args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#>", move |_, _, args| Value::Bool(args[0].unchecked_int() > args[1].unchecked_int()))?;
+	symtab.add_binary_bool(int_(), "op#>=", move |_, _, args| Value::Bool(args[0].unchecked_int() >= args[1].unchecked_int()))?;
 	symtab.add_default(int_(), move |_| Value::Int(0))?;
 
-	symtab.add_binary(real_(), "op#+", move |_, args| Value::Real(args[0].unchecked_real() + args[1].unchecked_real()))?;
-	symtab.add_binary(real_(), "op#-", move |_, args| Value::Real(args[0].unchecked_real() - args[1].unchecked_real()))?;
-	symtab.add_binary(real_(), "op#*", move |_, args| Value::Real(args[0].unchecked_real() * args[1].unchecked_real()))?;
-	symtab.add_binary(real_(), "op#/", move |_, args| Value::Real(args[0].unchecked_real() / args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#==", move |_, args| Value::Bool(args[0].unchecked_real() == args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_real() != args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#<", move |_, args| Value::Bool(args[0].unchecked_real() < args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#<=", move |_, args| Value::Bool(args[0].unchecked_real() <= args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#>", move |_, args| Value::Bool(args[0].unchecked_real() > args[1].unchecked_real()))?;
-	symtab.add_binary_bool(real_(), "op#>=", move |_, args| Value::Bool(args[0].unchecked_real() >= args[1].unchecked_real()))?;
+	symtab.add_binary(real_(), "op#+", move |_, _, args| Value::Real(args[0].unchecked_real() + args[1].unchecked_real()))?;
+	symtab.add_binary(real_(), "op#-", move |_, _, args| Value::Real(args[0].unchecked_real() - args[1].unchecked_real()))?;
+	symtab.add_binary(real_(), "op#*", move |_, _, args| Value::Real(args[0].unchecked_real() * args[1].unchecked_real()))?;
+	symtab.add_binary(real_(), "op#/", move |_, _, args| Value::Real(args[0].unchecked_real() / args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#==", move |_, _, args| Value::Bool(args[0].unchecked_real() == args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#!=", move |_, _, args| Value::Bool(args[0].unchecked_real() != args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#<", move |_, _, args| Value::Bool(args[0].unchecked_real() < args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#<=", move |_, _, args| Value::Bool(args[0].unchecked_real() <= args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#>", move |_, _, args| Value::Bool(args[0].unchecked_real() > args[1].unchecked_real()))?;
+	symtab.add_binary_bool(real_(), "op#>=", move |_, _, args| Value::Bool(args[0].unchecked_real() >= args[1].unchecked_real()))?;
 	symtab.add_default(real_(), move |_| Value::Real(0.))?;
 
-	symtab.add_binary(str_(), "op#+", move |_, args| {
+	symtab.add_binary(str_(), "op#+", move |_, _, args| {
 		let a = args[0].borrow_obj().unwrap();
 		let b = args[1].borrow_obj().unwrap();
 		let mut s = String::with_capacity(a.unchecked_str().len() + b.unchecked_str().len());
@@ -75,44 +77,44 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 
 	symtab.add_builtin_function(
 		vec!["str".into(), "from".into()], &str_(), &[(bool_(), "v".into())],
-		move |_, args| Obj::Str(args[0].unchecked_bool().to_string()).to_heap()
+		move |_, _, args| Obj::Str(args[0].unchecked_bool().to_string()).to_heap()
 	)?;
 	symtab.add_builtin_function(
 		vec!["str".into(), "from".into()], &str_(), &[(int_(), "v".into())],
-		move |_, args| Obj::Str(args[0].unchecked_int().to_string()).to_heap()
+		move |_, _, args| Obj::Str(args[0].unchecked_int().to_string()).to_heap()
 	)?;
 	symtab.add_builtin_function(
 		vec!["str".into(), "from".into()], &str_(), &[(real_(), "v".into())],
-		move |_, args| Obj::Str(args[0].unchecked_real().to_string()).to_heap()
+		move |_, _, args| Obj::Str(args[0].unchecked_real().to_string()).to_heap()
 	)?;
 	symtab.add_default(str_(), move |_| Obj::Str("".to_string()).to_heap())?;
 
 	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[],
-		move |_, _| { print!("\n"); Value::Void }
+		move |_, _, _| { print!("\n"); Value::Void }
 	)?;
 	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[(int_(), "v".into())],
-		move |_, args| { print!("{}", args[0].unchecked_int()); Value::Void }
+		move |_, _, args| { print!("{}", args[0].unchecked_int()); Value::Void }
 	)?;
 	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[(real_(), "v".into())],
-		move |_, args| { print!("{}", args[0].unchecked_real()); Value::Void }
+		move |_, _, args| { print!("{}", args[0].unchecked_real()); Value::Void }
 	)?;
 	symtab.add_builtin_function(
 		vec!["print".into()], &void_(), &[(str_(), "v".into())],
-		move |_, args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
+		move |_, _, args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
 
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(vec!["gui".into()], TypeBody::Incomplete))?;
 	symtab.add_builtin_function(
 		vec!["gui".into(), "init".into()], &void_(), &[],
-		move |_, _args| { gtk::init().expect("GTK init failed"); Value::Void }
+		move |_, _, _args| { gtk::init().expect("GTK init failed"); Value::Void }
 	)?;
 	symtab.add_builtin_function(
 		vec!["gui".into(), "run".into()], &void_(), &[],
-		move |_, _args| { gtk::main(); Value::Void }
+		move |_, _, _args| { gtk::main(); Value::Void }
 	)?;
 
 	// TODO make it easier to build enums from here...
@@ -133,29 +135,44 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	symtab.add_type(button.clone())?;
 	symtab.add_builtin_static_method(
 		&button, "new", &button, &[],
-		move |_, _args| Obj::GuiButton(gtk::Button::new()).to_heap()
+		move |_, _, _args| Obj::GuiButton(gtk::Button::new()).to_heap()
 	)?;
 	symtab.add_builtin_method(
 		&button, "label=", &void_(), &[(str_(), "s".into())],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
+		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
+	)?;
+	symtab.add_builtin_method(
+		&button, "connect_clicked", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
+		move |_, _, args| {
+			let obj = args[0].borrow_obj().unwrap();
+			let obj = obj.unchecked_gtk_button();
+			let target = args[1].clone();
+			let funcname = args[2].borrow_obj().unwrap().unchecked_str().to_owned();
+			obj.connect_clicked(move |_butt| {
+				println!("{}", funcname);
+				// let mut qid = target.
+				// call_func(symtab, qid: &[Symbol], args: &[Value], arg_types: &[Type])
+			});
+			Value::Void
+		}
 	)?;
 
 	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
 	symtab.add_type(window.clone())?;
 	symtab.add_builtin_static_method(
 		&window, "new", &window, &[],
-		move |_, _args| Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap()
+		move |_, _, _args| Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap()
 	)?;
 	symtab.add_builtin_method(
 		&window, "show", &void_(), &[],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_window().show_all(); Value::Void }
+		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_window().show_all(); Value::Void }
 	)?;
 
 	let boxt = Type::from_body(vec!["gui".into(), "Box".into()], TypeBody::Primitive(PrimitiveType::GuiBox));
 	symtab.add_type(boxt.clone())?;
 	symtab.add_builtin_static_method(
 		&boxt, "new", &boxt, &[(orientation.clone(), "orientation".into())],
-		move |_, args| {
+		move |_, _, args| {
 			let orient = match args[0].unchecked_enum_index() {
 				0 => gtk::Orientation::Horizontal,
 				1 => gtk::Orientation::Vertical,
@@ -166,11 +183,11 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	)?;
 	symtab.add_builtin_method(
 		&boxt, "spacing=", &int_(), &[],
-		move |_, args| Value::Int(args[0].borrow_obj().unwrap().unchecked_gtk_box().get_spacing().into())
+		move |_, _, args| Value::Int(args[0].borrow_obj().unwrap().unchecked_gtk_box().get_spacing().into())
 	)?;
 	symtab.add_builtin_method(
 		&boxt, "spacing=", &void_(), &[(int_(), "spacing".into())],
-		move |_, args| { args[0].borrow_obj().unwrap().unchecked_gtk_box().set_spacing(args[1].unchecked_int().try_into().unwrap()); Value::Void }
+		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_box().set_spacing(args[1].unchecked_int().try_into().unwrap()); Value::Void }
 	)?;
 
 	let container_parents = vec![window.clone(), boxt.clone()];
@@ -179,7 +196,7 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		for child in &container_children {
 			symtab.add_builtin_method(
 				&parent, "add_child", &void_(), &[(child.clone(), "child".into())],
-				move |_, args| {
+				move |_, _, args| {
 					let parent_obj = args[0].borrow_obj().unwrap();
 					let child_obj = args[1].borrow_obj().unwrap();
 					parent_obj.unchecked_gtk_container().add(child_obj.unchecked_gtk_widget());
@@ -195,11 +212,11 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 pub fn inject_wrap_type(symtab: &mut SymbolTable, wrap_type: Type, target_type: Type) -> Result<(), SymTabError> {
 	symtab.add_builtin_static_method(
 		&wrap_type, "wrap", &wrap_type, &[(target_type.clone(), "v".into())],
-		move |_, args| args[0].clone()
+		move |_, _, args| args[0].clone()
 	)?;
 	symtab.add_builtin_method(
 		&wrap_type, "unwrap", &target_type, &[],
-		move |_, args| args[0].clone()
+		move |_, _, args| args[0].clone()
 	)?;
 	Ok(())
 }
@@ -207,11 +224,11 @@ pub fn inject_wrap_type(symtab: &mut SymbolTable, wrap_type: Type, target_type: 
 pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -> Result<(), SymTabError> {
 	symtab.add_builtin_method(
 		&typ, "discriminant", &symtab.int_type.clone(), &[],
-		move |_, args| { Value::Int(args[0].unchecked_enum_index().try_into().unwrap()) }
+		move |_, _, args| { Value::Int(args[0].unchecked_enum_index().try_into().unwrap()) }
 	)?;
 	if !has_fields {
-		symtab.add_binary_bool(typ.clone(), "op#==", move |_, args| Value::Bool(args[0].unchecked_enum_index() == args[1].unchecked_enum_index()))?;
-		symtab.add_binary_bool(typ.clone(), "op#!=", move |_, args| Value::Bool(args[0].unchecked_enum_index() != args[1].unchecked_enum_index()))?;
+		symtab.add_binary_bool(typ.clone(), "op#==", move |_, _, args| Value::Bool(args[0].unchecked_enum_index() == args[1].unchecked_enum_index()))?;
+		symtab.add_binary_bool(typ.clone(), "op#!=", move |_, _, args| Value::Bool(args[0].unchecked_enum_index() != args[1].unchecked_enum_index()))?;
 	}
 	Ok(())
 }
@@ -220,11 +237,11 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 	for (idx, (ftyp, fid)) in fields.iter().enumerate() {
 		symtab.add_builtin_method(
 			&typ, fid, ftyp, &[],
-			move |_, args| args[0].borrow_obj().unwrap().unchecked_record()[idx].clone()
+			move |_, _, args| args[0].borrow_obj().unwrap().unchecked_record()[idx].clone()
 		)?;
 		symtab.add_builtin_method(
 			&typ, &(fid.to_string() + "="), &symtab.void_type.clone(), &[(ftyp.clone(), "v".into())],
-			move |_, args| { args[0].borrow_obj_mut().unwrap().unchecked_record_mut()[idx] = args[1].clone(); Value::Void }
+			move |_, _, args| { args[0].borrow_obj_mut().unwrap().unchecked_record_mut()[idx] = args[1].clone(); Value::Void }
 		)?;
 	}
 
@@ -233,7 +250,7 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 	let typ_ = typ.clone();
 	symtab.add_builtin_static_method(
 		&typ, "default", &typ, &[],
-		move |symtab, _args| {
+		move |symtab, _, _args| {
 			let tbody = typ_.borrow();
 			let fields = tbody.unchecked_record_fields();
 			let mut values = Vec::with_capacity(fields.len());
@@ -249,7 +266,7 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 
 	symtab.add_builtin_static_method(
 		&typ, "build", &typ, &fields,
-		move |_, args| Obj::Record(args.to_vec()).to_heap()
+		move |_, _, args| Obj::Record(args.to_vec()).to_heap()
 	)?;
 
 	Ok(())

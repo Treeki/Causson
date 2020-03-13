@@ -7,18 +7,28 @@ type Wind = record {
 
 component CompWind {
 	wnd = gui:Window {
-		gui:Box(gui:Orientation:Vertical) {
-			.spacing = 10
-			butt1 = gui:Button { .label = "Butt1" }
-			butt2 = gui:Button { .label = "Butt2" }
+		gui:Box(gui:Orientation:Horizontal) {
+			.spacing = 20
+			butt0 = gui:Button { .label = "Butt0" }
+
+			gui:Box(gui:Orientation:Vertical) {
+				.spacing = 10
+				butt1 = gui:Button { .label = "Butt1" }
+				butt2 = gui:Button { .label = "Butt2" }
+			}
 		}
 	}
+}
+
+def CompWind:test() -> void {
+	print("beep boop")
 }
 
 def main() -> void {
 	gui:init()
 	let wind = CompWind:new()
 	wind.wnd.show()
+	wind.butt0.connect_clicked(wind, "test")
 	gui:run()
 }
 

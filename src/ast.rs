@@ -73,7 +73,7 @@ pub type Program = Vec<GlobalDef>;
 // TODO: Rename to BuiltinType or even remove?
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
-	Void, Bool, Int, Real, Str,
+	Any, Void, Bool, Int, Real, Str,
 	GuiBox, GuiButton, GuiWindow
 }
 
@@ -87,7 +87,11 @@ impl Deref for Type {
 }
 impl PartialEq for Type {
 	fn eq(&self, other: &Type) -> bool {
-		std::rc::Rc::ptr_eq(&self.0, &other.0)
+		match (self.is_any(), other.is_any()) {
+			(true, _) => true,
+			(_, true) => true,
+			(_, _)    => std::rc::Rc::ptr_eq(&self.0, &other.0)
+		}
 	}
 }
 impl Type {
@@ -100,6 +104,13 @@ impl Type {
 
 	pub fn from_body(name: QualID, body: TypeBody) -> Type {
 		Type(Rc::new(TypeData { name, body: RefCell::new(body) }))
+	}
+
+	pub fn is_any(&self) -> bool {
+		match *self.borrow() {
+			TypeBody::Primitive(PrimitiveType::Any) => true,
+			_ => false
+		}
 	}
 }
 
@@ -132,7 +143,7 @@ pub struct Function(Rc<FunctionData>);
 
 pub enum FunctionBody {
 	Incomplete(usize),
-	BuiltIn(Box<dyn Fn(&SymbolTable, &[Value]) -> Value>),
+	BuiltIn(Box<dyn Fn(&SymbolTable, &[Type], &[Value]) -> Value>),
 	Expr(Expr)
 }
 impl fmt::Debug for FunctionBody {
@@ -164,7 +175,7 @@ impl Function {
 	pub fn borrow_mut(&mut self) -> RefMut<FunctionBody> { self.0.body.borrow_mut() }
 
 	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, func: F) -> Function
-		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
 	{
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
@@ -219,8 +230,9 @@ pub enum ExprKind<P: Clone> {
 	LocalSetResolved(usize, Box<P>),
 	GlobalGet(QualID),
 	FunctionCall(QualID, Vec<P>),
-	FunctionCallResolved(Function, Vec<P>),
+	FunctionCallResolved(Function, Vec<Type>, Vec<P>),
 	MethodCall(Box<P>, Symbol, Vec<P>),
+	MethodCallResolved(Box<P>, Symbol, Vec<Type>, Vec<P>),
 	If(Box<P>, Box<P>, Option<Box<P>>),
 	Let(Symbol, Box<P>),
 	CodeBlock(Vec<P>),
@@ -337,6 +349,7 @@ pub struct SymbolTable {
 	pub int_type: Type,
 	pub real_type: Type,
 	pub str_type: Type,
+	pub any_type: Type,
 	pub root: SymTabNode
 }
 
@@ -357,6 +370,7 @@ impl SymbolTable {
 			int_type: Type::from_primitive("int", Int),
 			real_type: Type::from_primitive("real", Real),
 			str_type: Type::from_primitive("str", Str),
+			any_type: Type::from_primitive("any", Any),
 			root: SymTabNode::new_namespace()
 		};
 
@@ -365,6 +379,7 @@ impl SymbolTable {
 		symtab.add_type(symtab.int_type.clone()).unwrap();
 		symtab.add_type(symtab.real_type.clone()).unwrap();
 		symtab.add_type(symtab.str_type.clone()).unwrap();
+		// do not list the "any" type in the program!
 
 		crate::stdlib::inject(&mut symtab).expect("standard library injection failed");
 
@@ -385,12 +400,12 @@ impl SymbolTable {
 	}
 
 	pub fn add_builtin_function<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
 	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
 	{
 		let mut qid = Vec::with_capacity(typ.name.len() + 1);
 		for n in &typ.name { qid.push(*n) }
@@ -398,7 +413,7 @@ impl SymbolTable {
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
 	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
 	{
 		let mut qid = Vec::with_capacity(typ.name.len() + 1);
 		for n in &typ.name { qid.push(*n) }
@@ -406,7 +421,7 @@ impl SymbolTable {
 		self.add_builtin_fn(true, qid, return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Value]) -> Value + 'static
+		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
 	{
 		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), args.to_vec(), func))
 	}

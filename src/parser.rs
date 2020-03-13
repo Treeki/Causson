@@ -205,7 +205,7 @@ impl ParseContext {
 					} else {
 						self.symtab.add_builtin_static_method(
 							&typ, val_id, &typ, &fields,
-							move |_, args| { Value::Enum(i, args.to_vec()) }
+							move |_, _, args| { Value::Enum(i, args.to_vec()) }
 						)?;
 					}
 				}
@@ -479,9 +479,9 @@ impl<'a> CodeParseContext<'a> {
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
 				let func = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = func.return_type.clone();
-				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_exprs), typ: return_type })
+				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_types, arg_exprs), typ: return_type })
 			}
-			FunctionCallResolved(_, _) => unreachable!(),
+			FunctionCallResolved(_, _, _) => unreachable!(),
 			MethodCall(obj, sym, args) => {
 				let obj_expr = self.typecheck_expr(obj)?;
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
@@ -491,8 +491,9 @@ impl<'a> CodeParseContext<'a> {
 				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
 				let method = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = method.return_type.clone();
-				Ok(Expr { expr: MethodCall(Box::new(obj_expr), *sym, arg_exprs), typ: return_type })
+				Ok(Expr { expr: MethodCallResolved(Box::new(obj_expr), *sym, arg_types, arg_exprs), typ: return_type })
 			}
+			MethodCallResolved(_, _, _, _) => unreachable!(),
 			If(cond, if_true, if_false) => {
 				// don't use scoped_typecheck_expr here so the locals carry on into branches
 				let orig_local_depth = self.locals.len();

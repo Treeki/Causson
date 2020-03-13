@@ -8,7 +8,7 @@ pub fn call_func(symtab: &SymbolTable, qid: &[Symbol], args: &[Value], arg_types
 	let variants = node.get_function_variants()?;
 	let func = variants.iter().find(|f| f.matches_types(arg_types))?;
 	let context = EvalContext { symtab, locals: vec![] };
-	Some(context.eval_func(func, args.to_vec()))
+	Some(context.eval_func(func, arg_types, args.to_vec()))
 }
 
 pub struct EvalContext<'a> {
@@ -17,14 +17,14 @@ pub struct EvalContext<'a> {
 }
 
 impl EvalContext<'_> {
-	pub fn eval_func(&self, func: &Function, args: Vec<Value>) -> Value {
+	pub fn eval_func(&self, func: &Function, arg_types: &[Type], args: Vec<Value>) -> Value {
 		match &*func.borrow() {
 			FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
 			FunctionBody::Expr(sub_expr) => {
 				let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
 				sub_ctx.eval(&sub_expr)
 			}
-			FunctionBody::BuiltIn(f) => f(self.symtab, &args)
+			FunctionBody::BuiltIn(f) => f(self.symtab, arg_types, &args)
 		}
 	}
 
@@ -48,22 +48,22 @@ impl EvalContext<'_> {
 				value
 			}
 			FunctionCall(_, _) => unreachable!(),
-			FunctionCallResolved(func, arg_exprs) => {
+			FunctionCallResolved(func, arg_types, arg_exprs) => {
 				let args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
-				self.eval_func(func, args)
+				self.eval_func(func, &arg_types, args)
 			}
-			MethodCall(obj_expr, sym, arg_exprs) => {
+			MethodCall(_, _, _) => unreachable!(),
+			MethodCallResolved(obj_expr, sym, arg_types, arg_exprs) => {
 				// dynamic dispatch will go here eventually
 				// low-hanging optimisation fruit here...
 				let obj = self.eval(&obj_expr);
-				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
 				let type_node = self.symtab.root.resolve(&obj_expr.typ.name).unwrap();
 				let method_node = type_node.resolve(&[*sym]).unwrap();
 				let variants = method_node.get_function_variants().unwrap();
 				let func = variants.iter().find(|f| f.matches_types(&arg_types)).unwrap();
 				let mut args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
 				args.insert(0, obj);
-				self.eval_func(func, args)
+				self.eval_func(func, &arg_types, args)
 			}
 			If(cond_expr, if_true_expr, if_false_expr) => {
 				let orig_local_depth = self.locals.len();
@@ -226,7 +226,7 @@ mod tests {
 
 		let mut ctx = EvalContext { symtab: &symtab, locals: vec![Value::Bool(true)] };
 		let call_expr = expr(
-			FunctionCallResolved(test_func, vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
+			FunctionCallResolved(test_func, vec![symtab.bool_type.clone()], vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
 			&symtab.int_type
 		);
 		assert_eq!(ctx.eval(&call_expr), Value::Int(1));
