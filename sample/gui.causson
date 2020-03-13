@@ -20,8 +20,9 @@ component CompWind {
 	}
 }
 
-def CompWind:test() -> void {
+def CompWind:test(self) -> void {
 	print("beep boop")
+	print()
 }
 
 def main() -> void {

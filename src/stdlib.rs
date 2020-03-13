@@ -4,28 +4,31 @@ use crate::eval::*;
 use symbol::Symbol;
 use std::convert::TryInto;
 use gtk::prelude::*;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 impl SymbolTable {
-	fn add_binary<F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
+	fn add_binary<F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
 			&typ, name,
 			&typ, &[(typ.clone(), "v".into())],
 			f
 		)
 	}
-	fn add_binary_bool<F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
+	fn add_binary_bool<F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: &str, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
 			&typ, name,
 			&self.bool_type.clone(), &[(typ.clone(), "v".into())],
 			f
 		)
 	}
-	fn add_default<F: Fn(&SymbolTable) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
+	fn add_default<F: Fn(&Rc<RefCell<SymbolTable>>) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_static_method(&typ, "default", &typ, &[], move |s, _, _| f(s))
 	}
 }
 
-pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
+pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
+	let mut symtab = symtab_rc.borrow_mut();
 	let void_ = symtab.void_type.clone();
 	let void_ = || { void_.clone() };
 	let int_ = symtab.int_type.clone();
@@ -129,7 +132,7 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
 	orientation_c.insert("Horizontal".into(), SymTabNode::new_constant(orientation.clone(), Value::Enum(0, vec![])));
 	orientation_c.insert("Vertical".into(), SymTabNode::new_constant(orientation.clone(), Value::Enum(1, vec![])));
-	inject_enum_type(symtab, orientation.clone(), false)?;
+	inject_enum_type(&mut symtab, orientation.clone(), false)?;
 
 	let button = Type::from_body(vec!["gui".into(), "Button".into()], TypeBody::Primitive(PrimitiveType::GuiButton));
 	symtab.add_type(button.clone())?;
@@ -141,17 +144,20 @@ pub fn inject(symtab: &mut SymbolTable) -> Result<(), SymTabError> {
 		&button, "label=", &void_(), &[(str_(), "s".into())],
 		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
+	let symtab_rc_clone = Rc::clone(&symtab_rc);
 	symtab.add_builtin_method(
 		&button, "connect_clicked", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
-		move |_, _, args| {
+		move |_, arg_types, args| {
 			let obj = args[0].borrow_obj().unwrap();
 			let obj = obj.unchecked_gtk_button();
+			let target_type = arg_types[0].clone();
 			let target = args[1].clone();
-			let funcname = args[2].borrow_obj().unwrap().unchecked_str().to_owned();
+			let funcname: Symbol = args[2].borrow_obj().unwrap().unchecked_str().into();
+			let symtab_rc_clone = Rc::clone(&symtab_rc_clone);
 			obj.connect_clicked(move |_butt| {
-				println!("{}", funcname);
-				// let mut qid = target.
-				// call_func(symtab, qid: &[Symbol], args: &[Value], arg_types: &[Type])
+				let mut qid = target_type.name.clone();
+				qid.push(funcname);
+				call_func(&symtab_rc_clone, &qid, &[target.clone()], &[], true);
 			});
 			Value::Void
 		}
@@ -257,7 +263,7 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 			for (ftyp, _) in fields {
 				let mut ftyp_name = ftyp.name.clone();
 				ftyp_name.push("default".into());
-				values.push(call_func(symtab, &ftyp_name, &[], &[]).unwrap());
+				values.push(call_func(symtab, &ftyp_name, &[], &[], false).unwrap());
 			}
 
 			Obj::Record(values).to_heap()

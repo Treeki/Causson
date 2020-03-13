@@ -1,30 +1,34 @@
 use crate::ast::*;
 use crate::data::*;
 use symbol::Symbol;
+use std::rc::Rc;
+use std::cell::RefCell;
 
-pub fn call_func(symtab: &SymbolTable, qid: &[Symbol], args: &[Value], arg_types: &[Type]) -> Option<Value> {
-	assert!(args.len() == arg_types.len());
+pub fn call_func(symtab_rc: &Rc<RefCell<SymbolTable>>, qid: &[Symbol], args: &[Value], arg_types: &[Type], is_method: bool) -> Option<Value> {
+	let expected_arg_count = arg_types.len() + if is_method { 1 } else { 0 };
+	assert!(args.len() == expected_arg_count);
+	let context = EvalContext { symtab_rc: Rc::clone(symtab_rc), locals: vec![] };
+	let symtab = symtab_rc.borrow();
 	let node = symtab.root.resolve(qid)?;
 	let variants = node.get_function_variants()?;
-	let func = variants.iter().find(|f| f.matches_types(arg_types))?;
-	let context = EvalContext { symtab, locals: vec![] };
+	let func = variants.iter().find(|f| f.matches_types(arg_types) && f.is_method == is_method)?;
 	Some(context.eval_func(func, arg_types, args.to_vec()))
 }
 
-pub struct EvalContext<'a> {
-	symtab: &'a SymbolTable,
+pub struct EvalContext {
+	symtab_rc: Rc<RefCell<SymbolTable>>,
 	locals: Vec<Value>
 }
 
-impl EvalContext<'_> {
+impl EvalContext {
 	pub fn eval_func(&self, func: &Function, arg_types: &[Type], args: Vec<Value>) -> Value {
 		match &*func.borrow() {
 			FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
 			FunctionBody::Expr(sub_expr) => {
-				let mut sub_ctx = EvalContext { symtab: self.symtab, locals: args };
+				let mut sub_ctx = EvalContext { symtab_rc: Rc::clone(&self.symtab_rc), locals: args };
 				sub_ctx.eval(&sub_expr)
 			}
-			FunctionBody::BuiltIn(f) => f(self.symtab, arg_types, &args)
+			FunctionBody::BuiltIn(f) => f(&self.symtab_rc, arg_types, &args)
 		}
 	}
 
@@ -43,7 +47,8 @@ impl EvalContext<'_> {
 				value
 			}
 			GlobalGet(qid) => {
-				let node = self.symtab.root.resolve(&qid).unwrap();
+				let symtab = self.symtab_rc.borrow();
+				let node = symtab.root.resolve(&qid).unwrap();
 				let (_, value) = node.get_constant().unwrap();
 				value
 			}
@@ -57,7 +62,9 @@ impl EvalContext<'_> {
 				// dynamic dispatch will go here eventually
 				// low-hanging optimisation fruit here...
 				let obj = self.eval(&obj_expr);
-				let type_node = self.symtab.root.resolve(&obj_expr.typ.name).unwrap();
+				let symtab_rc = Rc::clone(&self.symtab_rc);
+				let symtab = symtab_rc.borrow();
+				let type_node = symtab.root.resolve(&obj_expr.typ.name).unwrap();
 				let method_node = type_node.resolve(&[*sym]).unwrap();
 				let variants = method_node.get_function_variants().unwrap();
 				let func = variants.iter().find(|f| f.matches_types(&arg_types)).unwrap();
@@ -72,11 +79,13 @@ impl EvalContext<'_> {
 					if cond {
 						let value = self.eval(&if_true_expr);
 						self.locals.truncate(orig_local_depth);
-						if expr.typ == self.symtab.void_type { Value::Void } else { value }
+						let symtab = self.symtab_rc.borrow();
+						if expr.typ == symtab.void_type { Value::Void } else { value }
 					} else if if_false_expr.is_some() {
 						let value = self.eval(&if_false_expr.as_ref().unwrap());
 						self.locals.truncate(orig_local_depth);
-						if expr.typ == self.symtab.void_type { Value::Void } else { value }
+						let symtab = self.symtab_rc.borrow();
+						if expr.typ == symtab.void_type { Value::Void } else { value }
 					} else {
 						self.locals.truncate(orig_local_depth);
 						Value::Void
@@ -121,8 +130,9 @@ mod tests {
 
 	#[test]
 	fn test_locals() {
-		let symtab = SymbolTable::new();
-		let mut ctx = EvalContext { symtab: &symtab, locals: vec![Value::Int(5)] };
+		let symtab_rc = SymbolTable::new_counted();
+		let symtab = symtab_rc.borrow();
+		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![Value::Int(5)] };
 
 		assert_eq!(
 			ctx.eval(&expr(LocalGetResolved(0), &symtab.int_type)),
@@ -140,8 +150,9 @@ mod tests {
 
 	#[test]
 	fn test_constants() {
-		let symtab = SymbolTable::new();
-		let mut ctx = EvalContext { symtab: &symtab, locals: vec![] };
+		let symtab_rc = SymbolTable::new_counted();
+		let symtab = symtab_rc.borrow();
+		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![] };
 
 		assert_eq!(ctx.eval(&expr(Int(Ok(5)), &symtab.int_type)), Value::Int(5));
 		assert_eq!(ctx.eval(&expr(Real(Ok(0.5)), &symtab.real_type)), Value::Real(0.5));
@@ -150,8 +161,9 @@ mod tests {
 
 	#[test]
 	fn test_block() {
-		let symtab = SymbolTable::new();
-		let mut ctx = EvalContext { symtab: &symtab, locals: vec![] };
+		let symtab_rc = SymbolTable::new_counted();
+		let symtab = symtab_rc.borrow();
+		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![] };
 
 		let result = ctx.eval(&expr(CodeBlock(vec![
 			expr(Let("test".into(), box_expr(Int(Ok(5)), &symtab.int_type)), &symtab.int_type),
@@ -165,9 +177,10 @@ mod tests {
 
 	#[test]
 	fn test_if() {
-		let symtab = SymbolTable::new();
+		let symtab_rc = SymbolTable::new_counted();
+		let symtab = symtab_rc.borrow();
 		let locals = vec![Value::Bool(true), Value::Int(0), Value::Real(0.0)];
-		let mut ctx = EvalContext { symtab: &symtab, locals };
+		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals };
 
 		// test return of the if block
 		let if_same_type = expr(If(
@@ -205,7 +218,8 @@ mod tests {
 
 	#[test]
 	fn test_function_calls() {
-		let mut symtab = SymbolTable::new();
+		let symtab_rc = SymbolTable::new_counted();
+		let symtab = symtab_rc.borrow();
 
 		// test function:
 		// if arg { 1 } else { 2 }
@@ -222,9 +236,15 @@ mod tests {
 		);
 		let mut test_func_node = SymTabNode::new_function();
 		test_func_node.get_function_variants_mut().unwrap().push(test_func.clone());
-		symtab.root.get_children_mut().unwrap().insert("test".into(), test_func_node);
 
-		let mut ctx = EvalContext { symtab: &symtab, locals: vec![Value::Bool(true)] };
+		// satisfy the borrow checker
+		drop(symtab);
+		let mut symtab_mut = symtab_rc.borrow_mut();
+		symtab_mut.root.get_children_mut().unwrap().insert("test".into(), test_func_node);
+		drop(symtab_mut);
+		let symtab = symtab_rc.borrow();
+
+		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![Value::Bool(true)] };
 		let call_expr = expr(
 			FunctionCallResolved(test_func, vec![symtab.bool_type.clone()], vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
 			&symtab.int_type

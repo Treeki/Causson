@@ -2,6 +2,8 @@ use symbol::Symbol;
 use crate::ast::*;
 use crate::data::*;
 use crate::stdlib;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 lazy_static! {
 	static ref ASSIGN_OP: Symbol = "=".into();
@@ -59,12 +61,12 @@ impl Type {
 }
 
 struct ParseContext {
-	symtab: SymbolTable
+	symtab_rc: Rc<RefCell<SymbolTable>>
 }
 
 impl ParseContext {
 	fn new() -> ParseContext {
-		ParseContext { symtab: SymbolTable::new() }
+		ParseContext { symtab_rc: SymbolTable::new_counted() }
 	}
 
 	fn preprocess_components(&self, program: &Program) -> Result<Program> {
@@ -169,17 +171,18 @@ impl ParseContext {
 	}
 
 	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &HLTypeDef) -> Result<()> {
-		let node = self.symtab.root.resolve_mut(name).expect("incomplete type should exist!");
+		let mut symtab = self.symtab_rc.borrow_mut();
+		let node = symtab.root.resolve_mut(name).expect("incomplete type should exist!");
 		let mut typ = node.get_type().expect("incomplete type should be a type");
 
 		match typedef {
 			HLTypeDef::Wrap(target_ref) => {
-				let target_type = self.symtab.root.resolve(target_ref).ok_or(ParserError::TypeIsMissing)?;
+				let target_type = symtab.root.resolve(target_ref).ok_or(ParserError::TypeIsMissing)?;
 				let target_type = target_type.get_type().ok_or(ParserError::TypeIsMissing)?;
 				target_type.ensure_complete()?;
 				*typ.borrow_mut() = TypeBody::Wrapper(target_type.clone());
 
-				stdlib::inject_wrap_type(&mut self.symtab, typ, target_type)?;
+				stdlib::inject_wrap_type(&mut symtab, typ, target_type)?;
 				Ok(())
 			}
 			HLTypeDef::Enum(values) => {
@@ -187,7 +190,7 @@ impl ParseContext {
 				for (val_id, fields) in values {
 					let fields = fields.iter().map(
 						|(tref, field_id)|
-						self.symtab.root
+						symtab.root
 							.resolve(tref)
 							.and_then(SymTabNode::get_type)
 							.ok_or(ParserError::TypeIsMissing)
@@ -199,11 +202,11 @@ impl ParseContext {
 				for (i, (val_id, fields)) in res_values.iter().enumerate() {
 					if fields.is_empty() {
 						// we have to re-select 'node' because the borrow checker is silly
-						let node = self.symtab.root.resolve_mut(name).unwrap();
+						let node = symtab.root.resolve_mut(name).unwrap();
 						let c = Value::Enum(i, vec![]);
 						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(typ.clone(), c));
 					} else {
-						self.symtab.add_builtin_static_method(
+						symtab.add_builtin_static_method(
 							&typ, val_id, &typ, &fields,
 							move |_, _, args| { Value::Enum(i, args.to_vec()) }
 						)?;
@@ -211,19 +214,19 @@ impl ParseContext {
 				}
 				let have_fields = res_values.iter().any(|v| !v.1.is_empty());
 				*typ.borrow_mut() = TypeBody::Enum(res_values);
-				stdlib::inject_enum_type(&mut self.symtab, typ, have_fields)?;
+				stdlib::inject_enum_type(&mut symtab, typ, have_fields)?;
 				Ok(())
 			}
 			HLTypeDef::Record(fields) => {
 				let fields = fields.iter().map(
 					|(tref, field_id)|
-					self.symtab.root
+					symtab.root
 						.resolve(tref)
 						.and_then(SymTabNode::get_type)
 						.ok_or(ParserError::TypeIsMissing)
 						.map(|t| (t, field_id.clone()))
 				).collect::<Result<Vec<(Type, Symbol)>>>()?;
-				stdlib::inject_record_type(&mut self.symtab, typ.clone(), &fields)?;
+				stdlib::inject_record_type(&mut symtab, typ.clone(), &fields)?;
 				*typ.borrow_mut() = TypeBody::Record(fields);
 				Ok(())
 			}
@@ -232,15 +235,18 @@ impl ParseContext {
 
 	fn collect_types(&mut self, prog: &Program, extra_defs: &Program) -> Result<()> {
 		let mut typedefs: Vec<&GlobalDef> = vec![];
+		let mut symtab = self.symtab_rc.borrow_mut();
 
 		for p in [prog, extra_defs].iter() {
 			for def in p.iter() {
 				if let GlobalDef::Type(name, _) = def {
-					self.symtab.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
+					symtab.add_type(Type::from_body(name.clone(), TypeBody::Incomplete))?;
 					typedefs.push(&def);
 				}
 			}
 		}
+
+		drop(symtab); // satisfy the borrow checker
 
 		// This may require multiple passes, and cycles may occur,
 		// so we must detect those and return an error
@@ -274,18 +280,20 @@ impl ParseContext {
 
 
 	fn collect_function_specs(&mut self, prog: &Program) -> Result<()> {
+		let mut symtab = self.symtab_rc.borrow_mut();
+
 		for (i, def) in prog.iter().enumerate() {
 			if let GlobalDef::Func(name, func_type, args, return_type, _) = def {
 				let args = args.iter().map(
 					|(tref, arg_id)|
-					self.symtab.root
+					symtab.root
 						.resolve(tref)
 						.and_then(SymTabNode::get_type)
 						.ok_or(ParserError::TypeIsMissing)
 						.map(|t| (t, arg_id.clone()))
 				).collect::<Result<Vec<(Type, Symbol)>>>()?;
 
-				let return_type = self.symtab.root
+				let return_type = symtab.root
 					.resolve(return_type)
 					.and_then(SymTabNode::get_type)
 					.ok_or(ParserError::TypeIsMissing)?;
@@ -294,7 +302,7 @@ impl ParseContext {
 					FuncType::Function => false,
 					FuncType::Method   => true
 				};
-				self.symtab.add_function(Function::new_incomplete(
+				symtab.add_function(Function::new_incomplete(
 					name.clone(), is_method, return_type, args, i
 				))?;
 			}
@@ -304,9 +312,13 @@ impl ParseContext {
 	}
 
 	fn collect_function_bodies(&mut self, prog: &Program) -> Result<()> {
+		// this is kind of horrid, but satisfies the borrow checker
+		let symtab_rc_clone = Rc::clone(&self.symtab_rc);
+		let symtab = symtab_rc_clone.borrow();
+
 		for (i, def) in prog.iter().enumerate() {
 			if let GlobalDef::Func(name, _, _, _, hlexpr) = def {
-				let func = self.symtab.root.resolve(name).unwrap();
+				let func = symtab.root.resolve(name).unwrap();
 				let variants = func.get_function_variants().unwrap();
 				let mut func = variants.iter().find(|f| f.is_incomplete(i)).unwrap().clone();
 
@@ -325,7 +337,7 @@ impl ParseContext {
 		let result_expr = ctx.typecheck_expr(expr)?;
 
 		// any final result is ok if the function returns void
-		if func.return_type != self.symtab.void_type {
+		if func.return_type != self.symtab_rc.borrow().void_type {
 			Type::ensure_equal(&result_expr.typ, &func.return_type)?;
 		}
 		Ok(result_expr)
@@ -419,8 +431,9 @@ impl<'a> CodeParseContext<'a> {
 	fn new(parent_ctx: &'a ParseContext, func: &FunctionData) -> CodeParseContext<'a> {
 		let mut locals = vec![];
 		if func.is_method {
+			let symtab = parent_ctx.symtab_rc.borrow();
 			let owner_name = func.name.split_last().unwrap().1;
-			let owner_node = parent_ctx.symtab.root.resolve(owner_name).unwrap();
+			let owner_node = symtab.root.resolve(owner_name).unwrap();
 			let owner_type = owner_node.get_type().unwrap();
 			locals.push((owner_type, "self".into()));
 		}
@@ -448,6 +461,8 @@ impl<'a> CodeParseContext<'a> {
 	}
 
 	fn typecheck_expr(&mut self, expr: &UncheckedExpr) -> Result<Expr> {
+		let symtab = self.parent.symtab_rc.borrow();
+
 		use ExprKind::*;
 		match &expr.0 {
 			LocalGet(sym) => {
@@ -466,7 +481,7 @@ impl<'a> CodeParseContext<'a> {
 			GlobalGet(qid) => {
 				// right now this is JUST for enum constants
 				let (sym, node_name) = qid.split_last().unwrap();
-				let node = self.parent.symtab.root.resolve(node_name).ok_or(ParserError::MissingNamespace)?;
+				let node = symtab.root.resolve(node_name).ok_or(ParserError::MissingNamespace)?;
 				let const_node = node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
 				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound)?;
 
@@ -475,7 +490,7 @@ impl<'a> CodeParseContext<'a> {
 			FunctionCall(qid, args) => {
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
-				let func = self.parent.symtab.root.resolve(qid).ok_or(ParserError::FunctionIsMissing)?;
+				let func = symtab.root.resolve(qid).ok_or(ParserError::FunctionIsMissing)?;
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
 				let func = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = func.return_type.clone();
@@ -486,7 +501,7 @@ impl<'a> CodeParseContext<'a> {
 				let obj_expr = self.typecheck_expr(obj)?;
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
-				let type_node = self.parent.symtab.root.resolve(&obj_expr.typ.name).expect("type missing");
+				let type_node = symtab.root.resolve(&obj_expr.typ.name).expect("type missing");
 				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
 				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
 				let method = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
@@ -498,19 +513,19 @@ impl<'a> CodeParseContext<'a> {
 				// don't use scoped_typecheck_expr here so the locals carry on into branches
 				let orig_local_depth = self.locals.len();
 				let cond_expr = self.typecheck_expr(cond)?;
-				Type::err_if_not_equal(&cond_expr.typ, &self.parent.symtab.bool_type, ParserError::BadIfConditionType)?;
+				Type::err_if_not_equal(&cond_expr.typ, &symtab.bool_type, ParserError::BadIfConditionType)?;
 				let if_true_expr = self.scoped_typecheck_expr(if_true)?;
 				let if_false_expr = if_false.as_ref().map(|e| self.scoped_typecheck_expr(&e)).transpose()?;
 				let typ = match &if_false_expr {
 					Some(e) if e.typ == if_true_expr.typ => e.typ.clone(),
-					_                                    => self.parent.symtab.void_type.clone()
+					_                                    => symtab.void_type.clone()
 				};
 				self.locals.truncate(orig_local_depth);
 				Ok(Expr { expr: If(Box::new(cond_expr), Box::new(if_true_expr), if_false_expr.map(Box::new)), typ })
 			}
 			Let(sym, value) => {
 				let value_expr = self.typecheck_expr(value)?;
-				Type::err_if_equal(&value_expr.typ, &self.parent.symtab.void_type, ParserError::LocalCannotBeVoid)?;
+				Type::err_if_equal(&value_expr.typ, &symtab.void_type, ParserError::LocalCannotBeVoid)?;
 				self.locals.push((value_expr.typ.clone(), *sym));
 				let typ = value_expr.typ.clone();
 				Ok(Expr { expr: Let(*sym, Box::new(value_expr)), typ })
@@ -521,20 +536,20 @@ impl<'a> CodeParseContext<'a> {
 				self.locals.truncate(orig_local_depth);
 				let final_type = match exprs.last() {
 					Some(e) => e.typ.clone(),
-					None    => self.parent.symtab.void_type.clone()
+					None    => symtab.void_type.clone()
 				};
 				Ok(Expr { expr: CodeBlock(exprs), typ: final_type })
 			}
-			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: self.parent.symtab.int_type.clone() }),
-			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: self.parent.symtab.real_type.clone() }),
-			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: self.parent.symtab.bool_type.clone() }),
-			Str(s)  => Ok(Expr { expr: Str(s.clone()),  typ: self.parent.symtab.str_type.clone() }),
+			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: symtab.int_type.clone() }),
+			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: symtab.real_type.clone() }),
+			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: symtab.bool_type.clone() }),
+			Str(s)  => Ok(Expr { expr: Str(s.clone()),  typ: symtab.str_type.clone() }),
 		}
 	}
 }
 
 
-pub fn make_symtab_from_program(prog: &Program) -> Result<SymbolTable> {
+pub fn make_symtab_from_program(prog: &Program) -> Result<Rc<RefCell<SymbolTable>>> {
 	let mut ctx = ParseContext::new();
 	let new_defs = ctx.preprocess_components(prog)?;
 	ctx.collect_types(prog, &new_defs)?;
@@ -542,7 +557,7 @@ pub fn make_symtab_from_program(prog: &Program) -> Result<SymbolTable> {
 	ctx.collect_function_specs(&new_defs)?;
 	ctx.collect_function_bodies(prog)?;
 	ctx.collect_function_bodies(&new_defs)?;
-	Ok(ctx.symtab)
+	Ok(ctx.symtab_rc)
 }
 
 
@@ -693,30 +708,34 @@ mod tests {
 	#[test]
 	fn test_typed_constants() {
 		let pc = ParseContext::new();
-		let func = Function::new_incomplete(vec!["test".into()], false, pc.symtab.void_type.clone(), vec![], 0);
+		let symtab = pc.symtab_rc.borrow();
+
+		let func = Function::new_incomplete(vec!["test".into()], false, symtab.void_type.clone(), vec![], 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
-		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, pc.symtab.bool_type.clone());
-		assert_eq!(cpc.typecheck_expr(&expr(Int(Ok(5)))).unwrap().typ, pc.symtab.int_type.clone());
-		assert_eq!(cpc.typecheck_expr(&expr(Real(Ok(5.)))).unwrap().typ, pc.symtab.real_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, symtab.bool_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Int(Ok(5)))).unwrap().typ, symtab.int_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Real(Ok(5.)))).unwrap().typ, symtab.real_type.clone());
 	}
 
 	#[test]
 	fn test_typed_variables() {
 		let pc = ParseContext::new();
-		let args = vec![(pc.symtab.int_type.clone(), "var".into())];
-		let func = Function::new_incomplete(vec!["test".into()], false, pc.symtab.void_type.clone(), args, 0);
+		let symtab = pc.symtab_rc.borrow();
+
+		let args = vec![(symtab.int_type.clone(), "var".into())];
+		let func = Function::new_incomplete(vec!["test".into()], false, symtab.void_type.clone(), args, 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
 		// Get
 		let e = cpc.typecheck_expr(&expr(LocalGet("var".into())));
-		assert_eq!(e.unwrap().typ, pc.symtab.int_type.clone());
+		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
 		let e = cpc.typecheck_expr(&expr(LocalGet("nevar".into())));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound);
 
 		// Set
 		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Int(Ok(5))))));
-		assert_eq!(e.unwrap().typ, pc.symtab.int_type.clone());
+		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
 		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Bool(false)))));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::TypeMismatch);
 	}

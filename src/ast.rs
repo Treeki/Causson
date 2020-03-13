@@ -143,7 +143,7 @@ pub struct Function(Rc<FunctionData>);
 
 pub enum FunctionBody {
 	Incomplete(usize),
-	BuiltIn(Box<dyn Fn(&SymbolTable, &[Type], &[Value]) -> Value>),
+	BuiltIn(Box<dyn Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value>),
 	Expr(Expr)
 }
 impl fmt::Debug for FunctionBody {
@@ -175,7 +175,7 @@ impl Function {
 	pub fn borrow_mut(&mut self) -> RefMut<FunctionBody> { self.0.body.borrow_mut() }
 
 	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, func: F) -> Function
-		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
@@ -362,7 +362,7 @@ pub enum SymTabError {
 }
 
 impl SymbolTable {
-	pub fn new() -> SymbolTable {
+	pub fn new_counted() -> Rc<RefCell<SymbolTable>> {
 		use PrimitiveType::*;
 		let mut symtab = SymbolTable {
 			void_type: Type::from_primitive("void", Void),
@@ -381,9 +381,10 @@ impl SymbolTable {
 		symtab.add_type(symtab.str_type.clone()).unwrap();
 		// do not list the "any" type in the program!
 
-		crate::stdlib::inject(&mut symtab).expect("standard library injection failed");
+		let symtab_rc = Rc::new(RefCell::new(symtab));
+		crate::stdlib::inject(&symtab_rc).expect("standard library injection failed");
 
-		symtab
+		symtab_rc
 	}
 
 	pub fn add_type(&mut self, typ: Type) -> Result<(), SymTabError> {
@@ -400,12 +401,12 @@ impl SymbolTable {
 	}
 
 	pub fn add_builtin_function<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
 	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
 		let mut qid = Vec::with_capacity(typ.name.len() + 1);
 		for n in &typ.name { qid.push(*n) }
@@ -413,7 +414,7 @@ impl SymbolTable {
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
 	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
 		let mut qid = Vec::with_capacity(typ.name.len() + 1);
 		for n in &typ.name { qid.push(*n) }
@@ -421,7 +422,7 @@ impl SymbolTable {
 		self.add_builtin_fn(true, qid, return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&SymbolTable, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
 		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), args.to_vec(), func))
 	}
