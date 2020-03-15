@@ -190,7 +190,7 @@ impl ParseContext {
 					Ok(result)
 				}
 
-				let mut next_updater_id = 0;
+				let mut next_callback_id = 0;
 
 				for (index, instance) in instances.iter().enumerate() {
 					let mut sub_index = index + 1;
@@ -203,8 +203,26 @@ impl ParseContext {
 								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
 								sub_index += get_instance_weight(_sub_instance);
 							},
+							HLCompSubDef::EventConnection(event_id, value_expr) => {
+								// Make a method
+								let method_id = format!("_cb_{}", next_callback_id).into();
+								next_callback_id += 1;
+
+								let mut method_qid = comp_id.clone();
+								method_qid.push(method_id);
+								extra_defs.push(GlobalDef::Func(
+									method_qid,
+									FuncType::Method,
+									vec![],
+									vec!["void".into()],
+									value_expr.clone()
+								));
+
+								// Rely on the existing Notifier logic
+								let this_expr = HLExpr::ID(vec![instance_ids[index]]);
+								prop_updates.push((method_id, this_expr, *event_id));
+							},
 							HLCompSubDef::PropertySet(prop_id, value_expr) => {
-								// TODO: dynamic properties
 								let deps = scan_dependencies(value_expr)?;
 								println!("DEPS FOR {:?}: {:?}", prop_id, deps);
 								if deps.is_empty() {
@@ -215,8 +233,8 @@ impl ParseContext {
 									new_frag.push(set_expr);
 								} else {
 									// Make a method
-									let updater_id = format!("_upd_{}", next_updater_id).into();
-									next_updater_id += 1;
+									let updater_id = format!("_upd_{}", next_callback_id).into();
+									next_callback_id += 1;
 
 									let self_expr = HLExpr::ID(vec!["self".into()]);
 									let parent_expr = HLExpr::PropAccess(Box::new(self_expr), instance_ids[index]);

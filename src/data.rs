@@ -13,7 +13,7 @@ pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
 	GuiBox(gtk::Box),
-	GuiButton(gtk::Button),
+	GuiButton { button: gtk::Button, clicked_notifier: Value },
 	GuiWindow(gtk::Window),
 	Notifier(Vec<(Value, Vec<Symbol>)>)
 }
@@ -45,7 +45,7 @@ impl Obj {
 	}
 	pub fn unchecked_gtk_button(&self) -> &gtk::Button {
 		match self {
-			Obj::GuiButton(b) => b,
+			Obj::GuiButton { button, .. } => button,
 			_ => panic!("GuiButton heapobj expected")
 		}
 	}
@@ -74,7 +74,7 @@ impl Obj {
 	pub fn unchecked_gtk_widget(&self) -> &gtk::Widget {
 		match self {
 			Obj::GuiBox(b) => b.upcast_ref(),
-			Obj::GuiButton(b) => b.upcast_ref(),
+			Obj::GuiButton { button, .. } => button.upcast_ref(),
 			Obj::GuiWindow(w) => w.upcast_ref(),
 			_ => panic!("gtk::Widget heapobj expected")
 		}

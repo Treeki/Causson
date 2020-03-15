@@ -25,7 +25,7 @@ pub enum HLExpr {
 	Real(ParseResult<f64>),
 	Bool(bool),
 	Str(String)
-}
+} 
 
 // A definition for a new type
 #[derive(Debug, PartialEq)]
@@ -54,7 +54,8 @@ pub struct HLCompInstance {
 #[derive(Debug, PartialEq)]
 pub enum HLCompSubDef {
 	Instance(HLCompInstance),
-	PropertySet(Symbol, HLExpr)
+	PropertySet(Symbol, HLExpr),
+	EventConnection(Symbol, HLExpr)
 }
 
 #[derive(Debug, PartialEq)]

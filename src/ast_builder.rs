@@ -183,6 +183,16 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			let children = pairs.map(parse_comp_subdef).collect();
 			HLCompSubDef::Instance(HLCompInstance { name, what, new_args, children })
 		},
+		Rule::compEventConnection => {
+			let mut pairs = pair.into_inner();
+			let id = parse_id(pairs.next().unwrap());
+			let expr = match pairs.peek().unwrap().as_rule() {
+				Rule::expr => parse_hlexpr(pairs.next().unwrap()),
+				Rule::codeBlock => parse_code_block(pairs.next().unwrap()),
+				_ => unreachable!()
+			};
+			HLCompSubDef::EventConnection(id, expr)
+		},
 		Rule::compPropSet => {
 			let mut pairs = pair.into_inner();
 			let id = parse_id(pairs.next().unwrap());
@@ -539,14 +549,15 @@ mod tests {
 			})
 		])]);
 
-		let c = pcc("component xyz {x = Gui:Window { .title = \"beep\" }}").unwrap();
+		let c = pcc("component xyz {x = Gui:Window { .title = \"beep\" \n .test -> {\n1\n} }}").unwrap();
 		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: Some("x".into()),
 				what: vec!["Gui".into(), "Window".into()],
 				new_args: vec![],
 				children: vec![
-					HLCompSubDef::PropertySet("title".into(), HLExpr::Str("beep".to_string()))
+					HLCompSubDef::PropertySet("title".into(), HLExpr::Str("beep".to_string())),
+					HLCompSubDef::EventConnection("test".into(), HLExpr::Int(Ok(1)))
 				]
 			})
 		])]);

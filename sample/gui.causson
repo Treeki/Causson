@@ -11,7 +11,12 @@ component CompWind {
 	wnd = gui:Window {
 		gui:Box(gui:Orientation:Horizontal) {
 			.spacing = 20
-			butt0 = gui:Button { .label = str:from(self.count) }
+			butt0 = gui:Button {
+				.label = str:from(self.count)
+				.clicked -> {
+					self.count = self.count + 1
+				}
+			}
 
 			gui:Box(gui:Orientation:Vertical) {
 				.spacing = 10
@@ -32,7 +37,6 @@ def main() -> void {
 	gui:init()
 	let wind = CompWind:new()
 	wind.wnd.show()
-	wind.butt0.connect_clicked(wind, "test")
 	gui:run()
 }
 

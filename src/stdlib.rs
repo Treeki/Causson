@@ -121,6 +121,36 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		move |_, _, args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
 
+	let notifier = Type::from_body(vec!["Notifier".into()], TypeBody::Primitive(PrimitiveType::Notifier));
+	symtab.add_type(notifier.clone())?;
+	symtab.add_builtin_static_method(
+		&notifier, "new", &notifier, &[],
+		move |_, _, _| Obj::Notifier(vec![]).to_heap()
+	)?;
+	symtab.add_builtin_method(
+		&notifier, "connect", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
+		move |_, arg_types, args| {
+			let mut notifier = args[0].borrow_obj_mut().unwrap();
+			let target_type = arg_types[0].clone();
+			let target = args[1].clone();
+			let funcname: Symbol = args[2].borrow_obj().unwrap().unchecked_str().into();
+			let mut qid = target_type.name.clone();
+			qid.push(funcname);
+			notifier.unchecked_notifier_mut().push((target, qid));
+			Value::Void
+		}
+	)?;
+	symtab.add_builtin_method(
+		&notifier, "notify", &void_(), &[],
+		move |symtab, _, args| {
+			let notifier = args[0].borrow_obj().unwrap();
+			for (target, func_qid) in notifier.unchecked_notifier() {
+				call_func(symtab, func_qid, &[target.clone()], &[], true);
+			}
+			Value::Void
+		}
+	)?;
+
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(vec!["gui".into()], TypeBody::Incomplete))?;
 	symtab.add_builtin_function(
@@ -150,29 +180,37 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	symtab.add_type(button.clone())?;
 	symtab.add_builtin_static_method(
 		&button, "new", &button, &[],
-		move |_, _, _args| Obj::GuiButton(gtk::Button::new()).to_heap()
+		move |symtab_rc, _, _args| {
+			let button = gtk::Button::new();
+			let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+			let val = Obj::GuiButton { button: button.clone(), clicked_notifier }.to_heap();
+			let symtab_rc = Rc::clone(&symtab_rc);
+
+			let val_ = val.clone();
+			button.connect_clicked(move |_| {
+				match &*val_.borrow_obj().unwrap() {
+					Obj::GuiButton { clicked_notifier, .. } => {
+						call_func(&symtab_rc, &["Notifier".into(), "notify".into()], &[clicked_notifier.clone()], &[], true);
+					},
+					_ => unreachable!()
+				}
+			});
+
+			val
+		}
+	)?;
+	symtab.add_builtin_method(
+		&button, "_n_clicked", &notifier, &[],
+		move |_, _, args| {
+			match &*args[0].borrow_obj().unwrap() {
+				Obj::GuiButton { clicked_notifier, .. } => clicked_notifier.clone(),
+				_ => unreachable!()
+			}
+		}
 	)?;
 	symtab.add_builtin_method(
 		&button, "label=", &void_(), &[(str_(), "s".into())],
 		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
-	)?;
-	let symtab_rc_clone = Rc::clone(&symtab_rc);
-	symtab.add_builtin_method(
-		&button, "connect_clicked", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
-		move |_, arg_types, args| {
-			let obj = args[0].borrow_obj().unwrap();
-			let obj = obj.unchecked_gtk_button();
-			let target_type = arg_types[0].clone();
-			let target = args[1].clone();
-			let funcname: Symbol = args[2].borrow_obj().unwrap().unchecked_str().into();
-			let symtab_rc_clone = Rc::clone(&symtab_rc_clone);
-			obj.connect_clicked(move |_butt| {
-				let mut qid = target_type.name.clone();
-				qid.push(funcname);
-				call_func(&symtab_rc_clone, &qid, &[target.clone()], &[], true);
-			});
-			Value::Void
-		}
 	)?;
 
 	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
@@ -223,36 +261,6 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			)?;
 		}
 	}
-
-	let notifier = Type::from_body(vec!["Notifier".into()], TypeBody::Primitive(PrimitiveType::Notifier));
-	symtab.add_type(notifier.clone())?;
-	symtab.add_builtin_static_method(
-		&notifier, "new", &notifier, &[],
-		move |_, _, _| Obj::Notifier(vec![]).to_heap()
-	)?;
-	symtab.add_builtin_method(
-		&notifier, "connect", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
-		move |_, arg_types, args| {
-			let mut notifier = args[0].borrow_obj_mut().unwrap();
-			let target_type = arg_types[0].clone();
-			let target = args[1].clone();
-			let funcname: Symbol = args[2].borrow_obj().unwrap().unchecked_str().into();
-			let mut qid = target_type.name.clone();
-			qid.push(funcname);
-			notifier.unchecked_notifier_mut().push((target, qid));
-			Value::Void
-		}
-	)?;
-	symtab.add_builtin_method(
-		&notifier, "notify", &void_(), &[],
-		move |symtab, _, args| {
-			let notifier = args[0].borrow_obj().unwrap();
-			for (target, func_qid) in notifier.unchecked_notifier() {
-				call_func(symtab, func_qid, &[target.clone()], &[], true);
-			}
-			Value::Void
-		}
-	)?;
 
 	Ok(())
 }
