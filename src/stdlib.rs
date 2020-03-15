@@ -22,6 +22,13 @@ impl SymbolTable {
 			f
 		)
 	}
+	fn add_simple_new<F: Fn(&Rc<RefCell<SymbolTable>>, Value) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
+		self.add_builtin_static_method(
+			&typ, "new",
+			&typ, &[(typ.clone(), "v".into())],
+			move |s, _, args| f(s, args[0].clone())
+		)
+	}
 	fn add_default<F: Fn(&Rc<RefCell<SymbolTable>>) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_static_method(&typ, "default", &typ, &[], move |s, _, _| f(s))
 	}
@@ -44,6 +51,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	symtab.add_binary_bool(bool_(), "op#==", move |_, _, args| Value::Bool(args[0].unchecked_bool() == args[1].unchecked_bool()))?;
 	symtab.add_binary_bool(bool_(), "op#!=", move |_, _, args| Value::Bool(args[0].unchecked_bool() != args[1].unchecked_bool()))?;
+	symtab.add_simple_new(bool_(), move |_, v| Value::Bool(v.unchecked_bool()))?;
+	symtab.add_default(bool_(), move |_| Value::Bool(false))?;
 
 	symtab.add_binary(int_(), "op#+", move |_, _, args| Value::Int(args[0].unchecked_int() + args[1].unchecked_int()))?;
 	symtab.add_binary(int_(), "op#-", move |_, _, args| Value::Int(args[0].unchecked_int() - args[1].unchecked_int()))?;
@@ -55,6 +64,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	symtab.add_binary_bool(int_(), "op#<=", move |_, _, args| Value::Bool(args[0].unchecked_int() <= args[1].unchecked_int()))?;
 	symtab.add_binary_bool(int_(), "op#>", move |_, _, args| Value::Bool(args[0].unchecked_int() > args[1].unchecked_int()))?;
 	symtab.add_binary_bool(int_(), "op#>=", move |_, _, args| Value::Bool(args[0].unchecked_int() >= args[1].unchecked_int()))?;
+	symtab.add_simple_new(int_(), move |_, v| Value::Int(v.unchecked_int()))?;
 	symtab.add_default(int_(), move |_| Value::Int(0))?;
 
 	symtab.add_binary(real_(), "op#+", move |_, _, args| Value::Real(args[0].unchecked_real() + args[1].unchecked_real()))?;
@@ -67,6 +77,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	symtab.add_binary_bool(real_(), "op#<=", move |_, _, args| Value::Bool(args[0].unchecked_real() <= args[1].unchecked_real()))?;
 	symtab.add_binary_bool(real_(), "op#>", move |_, _, args| Value::Bool(args[0].unchecked_real() > args[1].unchecked_real()))?;
 	symtab.add_binary_bool(real_(), "op#>=", move |_, _, args| Value::Bool(args[0].unchecked_real() >= args[1].unchecked_real()))?;
+	symtab.add_simple_new(real_(), move |_, v| Value::Real(v.unchecked_real()))?;
 	symtab.add_default(real_(), move |_| Value::Real(0.))?;
 
 	symtab.add_binary(str_(), "op#+", move |_, _, args| {
@@ -90,6 +101,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		vec!["str".into(), "from".into()], &str_(), &[(real_(), "v".into())],
 		move |_, _, args| Obj::Str(args[0].unchecked_real().to_string()).to_heap()
 	)?;
+	symtab.add_simple_new(str_(), move |_, s| Obj::Str(s.borrow_obj().unwrap().unchecked_str().clone()).to_heap())?;
 	symtab.add_default(str_(), move |_| Obj::Str("".to_string()).to_heap())?;
 
 	symtab.add_builtin_function(
