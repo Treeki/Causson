@@ -8,6 +8,39 @@ use symbol::Symbol;
 use crate::data::Value;
 pub type ParseResult<T> = Result<T, <T as FromStr>::Err>;
 
+#[macro_export]
+macro_rules! id {
+	($id:ident) => { stringify!($id).into() };
+	($id:expr) => { $id.into() };
+}
+
+#[macro_export]
+macro_rules! qid {
+	($($id:tt):*) => {
+		vec![ $( id!($id) ),* ]
+	};
+}
+
+#[macro_export]
+macro_rules! qid_slice {
+	($($id:tt):*) => {
+		&[ $( id!($id) ),* ]
+	};
+}
+
+#[macro_export]
+macro_rules! qid_combine {
+	($qid:expr, $id:expr) => {
+		{
+			let qid: &QualID = $qid;
+			let mut new_qid: QualID = Vec::with_capacity(qid.len() + 1);
+			for n in qid { new_qid.push(*n) }
+			new_qid.push($id);
+			new_qid
+		}
+	};
+}
+
 pub type QualID = Vec<Symbol>;
 
 // High Level Expressions:
@@ -99,8 +132,8 @@ impl Type {
 	pub fn borrow(&self) -> Ref<TypeBody> { self.0.body.borrow() }
 	pub fn borrow_mut(&mut self) -> RefMut<TypeBody> { self.0.body.borrow_mut() }
 
-	pub fn from_primitive(name: &str, ptyp: PrimitiveType) -> Type {
-		Type::from_body(vec![name.into()], TypeBody::Primitive(ptyp))
+	pub fn from_primitive(name: QualID, ptyp: PrimitiveType) -> Type {
+		Type::from_body(name, TypeBody::Primitive(ptyp))
 	}
 
 	pub fn from_body(name: QualID, body: TypeBody) -> Type {
@@ -366,12 +399,12 @@ impl SymbolTable {
 	pub fn new_counted() -> Rc<RefCell<SymbolTable>> {
 		use PrimitiveType::*;
 		let mut symtab = SymbolTable {
-			void_type: Type::from_primitive("void", Void),
-			bool_type: Type::from_primitive("bool", Bool),
-			int_type: Type::from_primitive("int", Int),
-			real_type: Type::from_primitive("real", Real),
-			str_type: Type::from_primitive("str", Str),
-			any_type: Type::from_primitive("any", Any),
+			void_type: Type::from_primitive(qid!(void), Void),
+			bool_type: Type::from_primitive(qid!(bool), Bool),
+			int_type: Type::from_primitive(qid!(int), Int),
+			real_type: Type::from_primitive(qid!(real), Real),
+			str_type: Type::from_primitive(qid!(str), Str),
+			any_type: Type::from_primitive(qid!(any), Any),
 			root: SymTabNode::new_namespace()
 		};
 
@@ -406,21 +439,15 @@ impl SymbolTable {
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
-	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
-		let mut qid = Vec::with_capacity(typ.name.len() + 1);
-		for n in &typ.name { qid.push(*n) }
-		qid.push(name.into());
-		self.add_builtin_fn(false, qid, return_type, args, func)
+		self.add_builtin_fn(false, qid_combine!(&typ.name, name), return_type, args, func)
 	}
-	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: &str, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
-		let mut qid = Vec::with_capacity(typ.name.len() + 1);
-		for n in &typ.name { qid.push(*n) }
-		qid.push(name.into());
-		self.add_builtin_fn(true, qid, return_type, args, func)
+		self.add_builtin_fn(true, qid_combine!(&typ.name, name), return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static

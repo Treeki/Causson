@@ -9,6 +9,7 @@ extern crate symbol;
 extern crate gtk;
 extern crate gio;
 
+#[macro_use]
 mod ast;
 mod ast_builder;
 mod data;
@@ -22,7 +23,7 @@ fn main() {
     let code = std::fs::read_to_string(&args[1]).unwrap();
     let parsed = ast_builder::parse_causson_code(&code).unwrap();
     let symtab_rc = parser::make_symtab_from_program(&parsed).unwrap();
-    let result = eval::call_func(&symtab_rc, &["main".into()], &[], &[], false).unwrap();
+    let result = eval::call_func(&symtab_rc, qid_slice!(main), &[], &[], false).unwrap();
     println!("Program Result: {:?}", result);
     data::MAIN_GC.with(|gc| {
         println!("GC Nodes: {}", gc.node_count());

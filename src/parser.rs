@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 lazy_static! {
-	static ref ASSIGN_OP: Symbol = "=".into();
+	static ref ASSIGN_OP: Symbol = id!("=");
 }
 
 #[derive(Debug, PartialEq)]
@@ -97,24 +97,22 @@ impl ParseContext {
 
 				for (index, instance) in instances.iter().enumerate() {
 					let (instance_id, notifier_id) = match instance.name {
-						Some(field_name) => (field_name, format!("_n_{}", field_name).into()),
-						None => (format!("_f_{}", index).into(), format!("_n_{}", index).into())
+						Some(field_name) => (field_name, id!(format!("_n_{}", field_name))),
+						None => (id!(format!("_f_{}", index)), id!(format!("_n_{}", index)))
 					};
 					instance_ids.push(instance_id);
 					notifier_ids.push(notifier_id);
 
 					// Add a new field to the record
 					record_fields.push((instance.what.clone(), instance_id));
-					record_fields.push((vec!["Notifier".into()], notifier_id));
+					record_fields.push((qid!(Notifier), notifier_id));
 
 					// Initialise these in our 'new' function
-					let mut instance_new_qid = instance.what.clone();
-					instance_new_qid.push("new".into());
-					let instance_new_expr = HLExpr::ID(instance_new_qid);
+					let instance_new_expr = HLExpr::ID(qid_combine!(&instance.what, id!(new)));
 					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), instance.new_args.clone());
 					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
 
-					let notifier_new_expr = HLExpr::ID(vec!["Notifier".into(), "new".into()]);
+					let notifier_new_expr = HLExpr::ID(qid!(Notifier:new));
 					let notifier_expr = HLExpr::Call(Box::new(notifier_new_expr), vec![]);
 					new_frag.push(HLExpr::Let(notifier_id, Box::new(notifier_expr)));
 				}
@@ -199,13 +197,13 @@ impl ParseContext {
 							HLCompSubDef::Instance(_sub_instance) => {
 								let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
 								let child_expr = HLExpr::ID(vec![instance_ids[sub_index]]);
-								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), "add_child".into());
+								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), id!(add_child));
 								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
 								sub_index += get_instance_weight(_sub_instance);
 							},
 							HLCompSubDef::EventConnection(event_id, value_expr) => {
 								// Make a method
-								let method_id = format!("_cb_{}", next_callback_id).into();
+								let method_id = id!(format!("_cb_{}", next_callback_id));
 								next_callback_id += 1;
 
 								let mut method_qid = comp_id.clone();
@@ -214,7 +212,7 @@ impl ParseContext {
 									method_qid,
 									FuncType::Method,
 									vec![],
-									vec!["void".into()],
+									qid!(void),
 									value_expr.clone()
 								));
 
@@ -229,17 +227,17 @@ impl ParseContext {
 									// Static property, assign on construction
 									let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
 									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
-									let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
+									let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
 									new_frag.push(set_expr);
 								} else {
 									// Make a method
-									let updater_id = format!("_upd_{}", next_callback_id).into();
+									let updater_id = id!(format!("_upd_{}", next_callback_id));
 									next_callback_id += 1;
 
-									let self_expr = HLExpr::ID(vec!["self".into()]);
+									let self_expr = HLExpr::ID(qid!(self));
 									let parent_expr = HLExpr::PropAccess(Box::new(self_expr), instance_ids[index]);
 									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
-									let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
+									let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
 
 									let mut updater_qid = comp_id.clone();
 									updater_qid.push(updater_id);
@@ -247,7 +245,7 @@ impl ParseContext {
 										updater_qid,
 										FuncType::Method,
 										vec![],
-										vec!["void".into()],
+										qid!(void),
 										set_expr
 									));
 
@@ -261,11 +259,10 @@ impl ParseContext {
 					}
 				}
 
-				let result_id = "self".into();
+				let result_id = id!(self);
 
 				// self = Type:build(...)
-				let mut build_qid = comp_id.clone();
-				build_qid.push("build".into());
+				let build_qid = qid_combine!(comp_id, id!(build));
 				let field_id_exprs = record_fields.iter().map(|(_, i)| HLExpr::ID(vec![*i])).collect();
 				new_frag.push(HLExpr::Let(result_id, Box::new(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs))));
 
@@ -279,9 +276,9 @@ impl ParseContext {
 				// Connect all notifiers
 				for (upd, dep_obj, dep_prop) in prop_updates {
 					println!("upd:{:?} dep_obj:{:?} dep_prop:{:?}", upd, dep_obj, dep_prop);
-					let notifier_id = format!("_n_{}", dep_prop).into();
+					let notifier_id = id!(format!("_n_{}", dep_prop));
 					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_id);
-					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), "connect".into());
+					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), id!(connect));
 					let self_expr = HLExpr::ID(vec![result_id]);
 					let upd_expr = HLExpr::Str(upd.to_string());
 					new_frag.push(HLExpr::Call(Box::new(connect_expr), vec![self_expr, upd_expr]));
@@ -290,15 +287,12 @@ impl ParseContext {
 				// Finally, return self
 				new_frag.push(HLExpr::ID(vec![result_id]));
 
-				let mut new_qid = comp_id.clone();
-				new_qid.push("new".into());
-
 				extra_defs.push(GlobalDef::Type(
 					comp_id.clone(),
 					HLTypeDef::Record { fields: record_fields, rename_setters: true }
 				));
 				extra_defs.push(GlobalDef::Func(
-					new_qid,
+					qid_combine!(comp_id, id!(new)),
 					FuncType::Function,
 					vec![],
 					comp_id.clone(),
@@ -310,25 +304,25 @@ impl ParseContext {
 					let mut code = vec![];
 
 					// Write it using the renamed default setter
-					let self_expr = HLExpr::ID(vec!["self".into()]);
-					let defsetter_id = format!("_set_{}", instance_id).into();
+					let self_expr = HLExpr::ID(qid!(self));
+					let defsetter_id = id!(format!("_set_{}", instance_id));
 					let defsetter_expr = HLExpr::PropAccess(Box::new(self_expr), defsetter_id);
-					let v_expr = HLExpr::ID(vec!["v".into()]);
+					let v_expr = HLExpr::ID(qid!(v));
 					code.push(HLExpr::Call(Box::new(defsetter_expr), vec![v_expr]));
 
 					// Call the notifier
-					let self_expr = HLExpr::ID(vec!["self".into()]);
+					let self_expr = HLExpr::ID(qid!(self));
 					let notifier_expr = HLExpr::PropAccess(Box::new(self_expr), notifier_id);
-					let notify_expr = HLExpr::PropAccess(Box::new(notifier_expr), "notify".into());
+					let notify_expr = HLExpr::PropAccess(Box::new(notifier_expr), id!(notify));
 					code.push(HLExpr::Call(Box::new(notify_expr), vec![]));
 
 					let mut setter_qid = comp_id.clone();
-					setter_qid.push(format!("{}=", instance_id).into());
+					setter_qid.push(id!(format!("{}=", instance_id)));
 					extra_defs.push(GlobalDef::Func(
 						setter_qid,
 						FuncType::Method,
-						vec![(instance.what.clone(), "v".into())],
-						vec!["void".into()],
+						vec![(instance.what.clone(), id!(v))],
+						qid!(void),
 						HLExpr::CodeBlock(code)
 					));
 				}
@@ -375,7 +369,7 @@ impl ParseContext {
 						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(typ.clone(), c));
 					} else {
 						symtab.add_builtin_static_method(
-							&typ, val_id, &typ, &fields,
+							&typ, *val_id, &typ, &fields,
 							move |_, _, args| { Value::Enum(i, args.to_vec()) }
 						)?;
 					}
@@ -534,7 +528,7 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 				box HLExpr::PropAccess(obj, sym) => {
 					// Set property
 					let obj   = Box::new(desugar_expr(&*obj)?);
-					let sym   = (sym.as_str().to_string() + "=").into();
+					let sym   = id!(sym.as_str().to_string() + "=");
 					let value = desugar_expr(&*rhs)?;
 					Ok(UncheckedExpr(ExprKind::MethodCall(obj, sym, vec![value])))
 				}
@@ -544,7 +538,7 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 		HLExpr::Binary(lhs, op, rhs) => {
 			// Binary op becomes a method call
 			let lhs = Box::new(desugar_expr(&*lhs)?);
-			let sym = ("op#".to_string() + op).into();
+			let sym = id!("op#".to_string() + op);
 			let rhs = desugar_expr(&*rhs)?;
 			Ok(UncheckedExpr(ExprKind::MethodCall(lhs, sym, vec![rhs])))
 		}
@@ -603,7 +597,7 @@ impl<'a> CodeParseContext<'a> {
 			let owner_name = func.name.split_last().unwrap().1;
 			let owner_node = symtab.root.resolve(owner_name).unwrap();
 			let owner_type = owner_node.get_type().unwrap();
-			locals.push((owner_type, "self".into()));
+			locals.push((owner_type, id!(self)));
 		}
 		locals.extend(func.arguments.iter().cloned());
 		CodeParseContext {
@@ -789,13 +783,13 @@ mod tests {
 	#[test]
 	fn test_desugar_get() {
 		check_desugar_ok(
-			HL::ID(vec!["foo".into()]),
-			LocalGet("foo".into())
+			HL::ID(qid!(foo)),
+			LocalGet(id!(foo))
 		);
 
 		check_desugar_ok(
-			HL::ID(vec!["foo".into(), "bar".into()]),
-			GlobalGet(vec!["foo".into(), "bar".into()])
+			HL::ID(qid!(foo:bar)),
+			GlobalGet(qid!(foo:bar))
 		);
 	}
 
@@ -803,15 +797,15 @@ mod tests {
 	fn test_desugar_assign_ok() {
 		let hl_int1 = Box::new(HL::Int(Ok(1)));
 		let int1 = box_expr(Int(Ok(1)));
-		let hl_foo = Box::new(HL::ID(vec!["foo".into()]));
+		let hl_foo = Box::new(HL::ID(qid!(foo)));
 
 		check_desugar_ok(
-			HL::Binary(hl_foo.clone(), "=".into(), hl_int1.clone()),
-			LocalSet("foo".into(), int1.clone())
+			HL::Binary(hl_foo.clone(), id!("="), hl_int1.clone()),
+			LocalSet(id!(foo), int1.clone())
 		);
 		check_desugar_ok(
-			HL::Binary(Box::new(HL::PropAccess(hl_foo.clone(), "bar".into())), "=".into(), hl_int1.clone()),
-			MethodCall(box_expr(LocalGet("foo".into())), "bar=".into(), vec![expr(Int(Ok(1)))])
+			HL::Binary(Box::new(HL::PropAccess(hl_foo.clone(), id!(bar))), id!("="), hl_int1.clone()),
+			MethodCall(box_expr(LocalGet(id!(foo))), id!("bar="), vec![expr(Int(Ok(1)))])
 		);
 	}
 
@@ -819,27 +813,27 @@ mod tests {
 	fn test_desugar_assign_err() {
 		fn check(target: HLExpr) {
 			check_desugar_err(
-				HL::Binary(Box::new(target), "=".into(), Box::new(HL::Int(Ok(1)))),
+				HL::Binary(Box::new(target), id!("="), Box::new(HL::Int(Ok(1)))),
 				ParserError::InvalidAssignTarget
 			);
 		}
 
-		check(HL::ID(vec!["a".into(), "b".into()]));
+		check(HL::ID(qid!(a:b)));
 		check(HL::Int(Ok(1)));
 		check(HL::Real(Ok(1.)));
 		check(HL::Bool(true));
-		check(HL::Binary(Box::new(HL::Int(Ok(1))), "+".into(), Box::new(HL::Int(Ok(2)))));
+		check(HL::Binary(Box::new(HL::Int(Ok(1))), id!("+"), Box::new(HL::Int(Ok(2)))));
 	}
 
 	#[test]
 	fn test_desugar_calls() {
 		check_desugar_ok(
-			HL::Call(Box::new(HL::ID(vec!["a".into()])), vec![]),
-			FunctionCall(vec!["a".into()], vec![])
+			HL::Call(Box::new(HL::ID(qid!(a))), vec![]),
+			FunctionCall(qid!(a), vec![])
 		);
 		check_desugar_ok(
-			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(vec!["a".into()])), "b".into())), vec![]),
-			MethodCall(box_expr(LocalGet("a".into())), "b".into(), vec![])
+			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(qid!(a))), id!(b))), vec![]),
+			MethodCall(box_expr(LocalGet(id!(a))), id!(b), vec![])
 		);
 		check_desugar_err(
 			HL::Call(Box::new(HL::Int(Ok(1))), vec![]),
@@ -866,8 +860,8 @@ mod tests {
 	#[test]
 	fn test_desugar_binary_ops() {
 		check_desugar_ok(
-			HL::Binary(Box::new(HL::Int(Ok(1))), "+".into(), Box::new(HL::Int(Ok(2)))),
-			MethodCall(box_expr(Int(Ok(1))), "op#+".into(), vec![expr(Int(Ok(2)))])
+			HL::Binary(Box::new(HL::Int(Ok(1))), id!("+"), Box::new(HL::Int(Ok(2)))),
+			MethodCall(box_expr(Int(Ok(1))), id!("op#+"), vec![expr(Int(Ok(2)))])
 		);
 	}
 
@@ -878,7 +872,7 @@ mod tests {
 		let pc = ParseContext::new();
 		let symtab = pc.symtab_rc.borrow();
 
-		let func = Function::new_incomplete(vec!["test".into()], false, symtab.void_type.clone(), vec![], 0);
+		let func = Function::new_incomplete(qid!(test), false, symtab.void_type.clone(), vec![], 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
 		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, symtab.bool_type.clone());
@@ -891,20 +885,20 @@ mod tests {
 		let pc = ParseContext::new();
 		let symtab = pc.symtab_rc.borrow();
 
-		let args = vec![(symtab.int_type.clone(), "var".into())];
-		let func = Function::new_incomplete(vec!["test".into()], false, symtab.void_type.clone(), args, 0);
+		let args = vec![(symtab.int_type.clone(), id!(var))];
+		let func = Function::new_incomplete(qid!(test), false, symtab.void_type.clone(), args, 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
 		// Get
-		let e = cpc.typecheck_expr(&expr(LocalGet("var".into())));
+		let e = cpc.typecheck_expr(&expr(LocalGet(id!(var))));
 		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
-		let e = cpc.typecheck_expr(&expr(LocalGet("nevar".into())));
+		let e = cpc.typecheck_expr(&expr(LocalGet(id!(nevar))));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound);
 
 		// Set
-		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Int(Ok(5))))));
+		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Int(Ok(5))))));
 		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
-		let e = cpc.typecheck_expr(&expr(LocalSet("var".into(), box_expr(Bool(false)))));
+		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Bool(false)))));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::TypeMismatch);
 	}
 }

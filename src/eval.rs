@@ -142,7 +142,7 @@ mod tests {
 			ctx.eval(&expr(LocalGetResolved(0), &symtab.int_type)),
 			Value::Int(10));
 
-		ctx.eval(&expr(Let("test".into(), box_expr(Int(Ok(20)), &symtab.int_type)), &symtab.int_type));
+		ctx.eval(&expr(Let(id!(test), box_expr(Int(Ok(20)), &symtab.int_type)), &symtab.int_type));
 		assert_eq!(
 			ctx.eval(&expr(LocalGetResolved(1), &symtab.int_type)),
 			Value::Int(20));
@@ -166,8 +166,8 @@ mod tests {
 		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![] };
 
 		let result = ctx.eval(&expr(CodeBlock(vec![
-			expr(Let("test".into(), box_expr(Int(Ok(5)), &symtab.int_type)), &symtab.int_type),
-			expr(Let("test2".into(), box_expr(Int(Ok(10)), &symtab.int_type)), &symtab.int_type),
+			expr(Let(id!(test), box_expr(Int(Ok(5)), &symtab.int_type)), &symtab.int_type),
+			expr(Let(id!(test2), box_expr(Int(Ok(10)), &symtab.int_type)), &symtab.int_type),
 			expr(LocalGetResolved(1), &symtab.int_type)
 		]), &symtab.int_type));
 		assert_eq!(result, Value::Int(10));
@@ -224,10 +224,10 @@ mod tests {
 		// test function:
 		// if arg { 1 } else { 2 }
 		let test_func = Function::new_expr(
-			vec!["test".into()],
+			qid!(test),
 			false,
 			symtab.int_type.clone(),
-			vec![(symtab.bool_type.clone(), "arg".into())],
+			vec![(symtab.bool_type.clone(), id!(arg))],
 			expr(If(
 				box_expr(LocalGetResolved(0), &symtab.bool_type),
 				box_expr(Int(Ok(1)), &symtab.int_type),
@@ -240,7 +240,7 @@ mod tests {
 		// satisfy the borrow checker
 		drop(symtab);
 		let mut symtab_mut = symtab_rc.borrow_mut();
-		symtab_mut.root.get_children_mut().unwrap().insert("test".into(), test_func_node);
+		symtab_mut.root.get_children_mut().unwrap().insert(id!(test), test_func_node);
 		drop(symtab_mut);
 		let symtab = symtab_rc.borrow();
 

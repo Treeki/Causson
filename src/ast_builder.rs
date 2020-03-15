@@ -11,7 +11,7 @@ type Pair<'a> = pest::iterators::Pair<'a, Rule>;
 
 fn parse_id(pair: Pair) -> Symbol {
 	assert_eq!(pair.as_rule(), Rule::id);
-	pair.as_str().into()
+	id!(pair.as_str())
 }
 
 fn parse_qualified_id(pair: Pair) -> QualID {
@@ -41,7 +41,7 @@ fn parse_hlexpr(pair: Pair) -> HLExpr {
 		pair.into_inner(),
 		parse_term,
 		|lhs: HLExpr, op: Pair, rhs: HLExpr| {
-			HLExpr::Binary(Box::new(lhs), op.as_str().into(), Box::new(rhs))
+			HLExpr::Binary(Box::new(lhs), id!(op.as_str()), Box::new(rhs))
 		}
 	)
 }
@@ -271,13 +271,13 @@ mod tests {
 				x = 1 + 3 -- * y
 			}").unwrap();
 		assert_eq!(c, vec![
-			GlobalDef::Type(vec!["a".into()], HLTypeDef::Wrap(vec!["a".into()])),
+			GlobalDef::Type(qid!(a), HLTypeDef::Wrap(qid!(a))),
 			GlobalDef::Func(
-				vec!["a".into()], FuncType::Function, vec![], vec!["void".into()],
+				qid!(a), FuncType::Function, vec![], qid!(void),
 				HLExpr::Binary(
-					Box::new(HLExpr::ID(vec!["x".into()])),
-					"=".into(),
-					Box::new(HLExpr::Binary(Box::new(HLExpr::Int(Ok(1))), "+".into(), Box::new(HLExpr::Int(Ok(3)))))
+					Box::new(HLExpr::ID(qid!(x))),
+					id!("="),
+					Box::new(HLExpr::Binary(Box::new(HLExpr::Int(Ok(1))), id!("+"), Box::new(HLExpr::Int(Ok(3)))))
 				)
 			)
 		]);
@@ -285,28 +285,23 @@ mod tests {
 
 	#[test]
 	fn test_wrap_type() {
-		let x_qid = vec!["x".into()];
-		let y_qid = vec!["y".into()];
-		let a_b_qid = vec!["a".into(), "b".into()];
-
 		let c = pcc("type x = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Wrap(y_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), HLTypeDef::Wrap(qid!(y)))]);
 		let c = pcc("type y = wrap a:b").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(y_qid.clone(), HLTypeDef::Wrap(a_b_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(y), HLTypeDef::Wrap(qid!(a:b)))]);
 		let c = pcc("type a:b = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(a_b_qid.clone(), HLTypeDef::Wrap(y_qid.clone()))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(a:b), HLTypeDef::Wrap(qid!(y)))]);
 	}
 
 	#[test]
 	fn test_enum_type() {
-		let x_qid = vec!["x".into()];
 		let a_b_c_syms = vec![
-			("a".into(), vec![]),
-			("b".into(), vec![(vec!["int".into()], "z".into())]),
-			("c".into(), vec![])
+			(id!(a), vec![]),
+			(id!(b), vec![(qid!(int), id!(z))]),
+			(id!(c), vec![])
 		];
 		let c = pcc("type x = enum(a,b(int z),c)").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid, HLTypeDef::Enum(a_b_c_syms))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), HLTypeDef::Enum(a_b_c_syms))]);
 	}
 
 	#[test]
@@ -321,117 +316,104 @@ mod tests {
 			HLTypeDef::Record { fields, rename_setters: false }
 		}
 
-		let x_qid = vec!["x".into()];
-		let int_a = (vec!["int".into()], "a".into());
-		let real_b = (vec!["real".into()], "b".into());
-		let xyz_c = (vec!["xyz".into()], "c".into());
+		let int_a = (qid!(int), id!(a));
+		let real_b = (qid!(real), id!(b));
+		let xyz_c = (qid!(xyz), id!(c));
 
 		let c = pcc("type x = record { int a, real b }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![int_a.clone(), real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![int_a.clone(), real_b.clone()]))]);
 		let c = pcc("type x = record { real b }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record {\nreal b\n}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record {real b,}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record { int a\nreal b, xyz c\n }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![int_a.clone(), real_b.clone(), xyz_c.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![int_a.clone(), real_b.clone(), xyz_c.clone()]))]);
 	}
 
 	#[test]
 	fn test_func_spec() {
-		let x_qid = vec!["x".into()];
-		let x_y_z_qid = vec!["x".into(), "y".into(), "z".into()];
-		let void_qid = vec!["void".into()];
-		let int_qid = vec!["int".into()];
-		let real_qid = vec!["real".into()];
-		let foo_bar_qid = vec!["foo".into(), "bar".into()];
-
 		let c = pcc("def x() -> void { }").unwrap();
 		let args = vec![];
-		assert_eq!(c, vec![GlobalDef::Func(x_qid.clone(), FuncType::Function, args, void_qid.clone(), HLExpr::CodeBlock(vec![]))]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, args, qid!(void), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(real r) -> int { }").unwrap();
-		let args = vec![(real_qid.clone(), "r".into())];
-		assert_eq!(c, vec![GlobalDef::Func(x_y_z_qid.clone(), FuncType::Function, args, int_qid.clone(), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![(qid!(real), id!(r))];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, qid!(int), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(real r, foo:bar fb, int i) -> foo:bar { }").unwrap();
-		let args = vec![(real_qid.clone(), "r".into()), (foo_bar_qid.clone(), "fb".into()), (int_qid.clone(), "i".into())];
-		assert_eq!(c, vec![GlobalDef::Func(x_y_z_qid.clone(), FuncType::Function, args, foo_bar_qid.clone(), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![(qid!(real), id!(r)), (qid!(foo:bar), id!(fb)), (qid!(int), id!(i))];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, qid!(foo:bar), HLExpr::CodeBlock(vec![]))]);
 	}
 
 	#[test]
 	fn test_method_spec() {
-		let x_y_z_qid = vec!["x".into(), "y".into(), "z".into()];
-		let void_qid = vec!["void".into()];
-		let int_qid = vec!["int".into()];
-		let real_qid = vec!["real".into()];
-
 		let c = pcc("def x:y:z(self) -> void { }").unwrap();
 		let args = vec![];
-		assert_eq!(c, vec![GlobalDef::Func(x_y_z_qid.clone(), FuncType::Method, args, void_qid.clone(), HLExpr::CodeBlock(vec![]))]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, qid!(void), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(self, real r) -> int { }").unwrap();
-		let args = vec![(real_qid.clone(), "r".into())];
-		assert_eq!(c, vec![GlobalDef::Func(x_y_z_qid.clone(), FuncType::Method, args, int_qid.clone(), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![(qid!(real), id!(r))];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, qid!(int), HLExpr::CodeBlock(vec![]))]);
 	}
 
 	fn assert_expr(ecode: &str, expected: HLExpr) {
 		let ecode = String::from("def x() -> void {") + ecode + "}";
 		let c = pcc(&ecode).expect(&ecode);
-		assert_eq!(c, vec![GlobalDef::Func(vec!["x".into()], FuncType::Function, vec![], vec!["void".into()], expected)]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, vec![], qid!(void), expected)]);
 	}
 
-	fn box_qid(i: &str) -> Box<HLExpr> { Box::new(HLExpr::ID(vec![i.into()])) }
+	fn box_qid(qid: QualID) -> Box<HLExpr> { Box::new(HLExpr::ID(qid)) }
 	fn box_bool(v: bool) -> Box<HLExpr> { Box::new(HLExpr::Bool(v)) }
 	fn box_int(v: i64) -> Box<HLExpr> { Box::new(HLExpr::Int(Ok(v))) }
 
 	#[test]
 	fn test_binary_ops() {
 		use HLExpr::*;
-		assert_expr("1 + 2", Binary(box_int(1), "+".into(), box_int(2)));
-		assert_expr("1 - 2", Binary(box_int(1), "-".into(), box_int(2)));
-		assert_expr("1 * 2", Binary(box_int(1), "*".into(), box_int(2)));
-		assert_expr("1 / 2", Binary(box_int(1), "/".into(), box_int(2)));
-		assert_expr("1 = 2", Binary(box_int(1), "=".into(), box_int(2)));
-		assert_expr("1 < 2", Binary(box_int(1), "<".into(), box_int(2)));
-		assert_expr("1 > 2", Binary(box_int(1), ">".into(), box_int(2)));
-		assert_expr("1 <= 2", Binary(box_int(1), "<=".into(), box_int(2)));
-		assert_expr("1 >= 2", Binary(box_int(1), ">=".into(), box_int(2)));
-		assert_expr("1 == 2", Binary(box_int(1), "==".into(), box_int(2)));
-		assert_expr("1 != 2", Binary(box_int(1), "!=".into(), box_int(2)));
+		assert_expr("1 + 2", Binary(box_int(1), id!("+"), box_int(2)));
+		assert_expr("1 - 2", Binary(box_int(1), id!("-"), box_int(2)));
+		assert_expr("1 * 2", Binary(box_int(1), id!("*"), box_int(2)));
+		assert_expr("1 / 2", Binary(box_int(1), id!("/"), box_int(2)));
+		assert_expr("1 = 2", Binary(box_int(1), id!("="), box_int(2)));
+		assert_expr("1 < 2", Binary(box_int(1), id!("<"), box_int(2)));
+		assert_expr("1 > 2", Binary(box_int(1), id!(">"), box_int(2)));
+		assert_expr("1 <= 2", Binary(box_int(1), id!("<="), box_int(2)));
+		assert_expr("1 >= 2", Binary(box_int(1), id!(">="), box_int(2)));
+		assert_expr("1 == 2", Binary(box_int(1), id!("=="), box_int(2)));
+		assert_expr("1 != 2", Binary(box_int(1), id!("!="), box_int(2)));
 	}
 
 	#[test]
 	fn test_binary_op_precedence() {
 		use HLExpr::*;
-		assert_expr("1 * 2 + 3", Binary(Box::new(Binary(box_int(1), "*".into(), box_int(2))), "+".into(), box_int(3)));
-		assert_expr("1 * (2 + 3)", Binary(box_int(1), "*".into(), Box::new(Binary(box_int(2), "+".into(), box_int(3)))));
+		assert_expr("1 * 2 + 3", Binary(Box::new(Binary(box_int(1), id!("*"), box_int(2))), id!("+"), box_int(3)));
+		assert_expr("1 * (2 + 3)", Binary(box_int(1), id!("*"), Box::new(Binary(box_int(2), id!("+"), box_int(3)))));
 
 		assert_expr(
 			"1 * 2 + 3 / 4 - 5 * 6",
 			Binary(
 				Box::new(Binary(
-					Box::new(Binary(box_int(1), "*".into(), box_int(2))),
-					"+".into(),
-					Box::new(Binary(box_int(3), "/".into(), box_int(4)))
+					Box::new(Binary(box_int(1), id!("*"), box_int(2))),
+					id!("+"),
+					Box::new(Binary(box_int(3), id!("/"), box_int(4)))
 				)),
-				"-".into(),
-				Box::new(Binary(box_int(5), "*".into(), box_int(6)))
+				id!("-"),
+				Box::new(Binary(box_int(5), id!("*"), box_int(6)))
 			)
 		);
 
 		assert_expr(
 			"a = 5 < x + 3",
 			Binary(
-				Box::new(ID(vec!["a".into()])),
-				"=".into(),
+				Box::new(ID(qid!(a))),
+				id!("="),
 				Box::new(Binary(
 					box_int(5),
-					"<".into(),
+					id!("<"),
 					Box::new(Binary(
-						Box::new(ID(vec!["x".into()])),
-						"+".into(),
+						Box::new(ID(qid!(x))),
+						id!("+"),
 						box_int(3)
 					))
 				))
@@ -465,7 +447,7 @@ mod tests {
 		assert_expr(
 			"if true { 1 } elif foo { 2 } else { 3 }",
 			If(box_bool(true), box_int(1), Some(
-				Box::new(If(box_qid("foo"), box_int(2), Some(box_int(3))))
+				Box::new(If(box_qid(qid!(foo)), box_int(2), Some(box_int(3))))
 			))
 		);
 		assert_expr(
@@ -484,15 +466,15 @@ mod tests {
 		use HLExpr::*;
 		assert_expr(
 			"let x = 5",
-			Let("x".into(), box_int(5))
+			Let(id!(x), box_int(5))
 		);
 		assert_expr(
 			"let x = 1 + 2 + 3",
 			Let(
-				"x".into(),
+				id!(x),
 				Box::new(Binary(
-					Box::new(Binary(box_int(1), "+".into(), box_int(2))),
-					"+".into(),
+					Box::new(Binary(box_int(1), id!("+"), box_int(2))),
+					id!("+"),
 					box_int(3)
 				))
 			)
@@ -502,46 +484,46 @@ mod tests {
 	#[test]
 	fn test_term_suffixes() {
 		use HLExpr::*;
-		assert_expr("a:b.c", PropAccess(Box::new(ID(vec!["a".into(), "b".into()])), "c".into()));
-		assert_expr("a.b", PropAccess(box_qid("a"), "b".into()));
-		assert_expr("a()", Call(box_qid("a"), vec![]));
-		assert_expr("a(1)", Call(box_qid("a"), vec![Int(Ok(1))]));
-		assert_expr("a(1, 2)", Call(box_qid("a"), vec![Int(Ok(1)), Int(Ok(2))]));
-		assert_expr("a.b(1, 2)", Call(Box::new(PropAccess(box_qid("a"), "b".into())), vec![Int(Ok(1)), Int(Ok(2))]));
-		assert_expr("a().b", PropAccess(Box::new(Call(box_qid("a"), vec![])), "b".into()));
+		assert_expr("a:b.c", PropAccess(Box::new(ID(qid!(a:b))), id!(c)));
+		assert_expr("a.b", PropAccess(box_qid(qid!(a)), id!(b)));
+		assert_expr("a()", Call(box_qid(qid!(a)), vec![]));
+		assert_expr("a(1)", Call(box_qid(qid!(a)), vec![Int(Ok(1))]));
+		assert_expr("a(1, 2)", Call(box_qid(qid!(a)), vec![Int(Ok(1)), Int(Ok(2))]));
+		assert_expr("a.b(1, 2)", Call(Box::new(PropAccess(box_qid(qid!(a)), id!(b))), vec![Int(Ok(1)), Int(Ok(2))]));
+		assert_expr("a().b", PropAccess(Box::new(Call(box_qid(qid!(a)), vec![])), id!(b)));
 	}
 
 	#[test]
 	fn test_component() {
 		let c = pcc("component xyz {}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![])]);
+		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![])]);
 
 		let c = pcc("component xyz {x = Gui:Window}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
-				name: Some("x".into()),
-				what: vec!["Gui".into(), "Window".into()],
+				name: Some(id!(x)),
+				what: qid!(Gui:Window),
 				new_args: vec![],
 				children: vec![]
 			})
 		])]);
 
 		let c = pcc("component xyz {Gui:Window(5) { y = Gui:Button \n Gui:Dummy }}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: None,
-				what: vec!["Gui".into(), "Window".into()],
+				what: qid!(Gui:Window),
 				new_args: vec![HLExpr::Int(Ok(5))],
 				children: vec![
 					HLCompSubDef::Instance(HLCompInstance {
-						name: Some("y".into()),
-						what: vec!["Gui".into(), "Button".into()],
+						name: Some(id!("y")),
+						what: qid!(Gui:Button),
 						new_args: vec![],
 						children: vec![]
 					}),
 					HLCompSubDef::Instance(HLCompInstance {
 						name: None,
-						what: vec!["Gui".into(), "Dummy".into()],
+						what: qid!(Gui:Dummy),
 						new_args: vec![],
 						children: vec![]
 					})
@@ -550,14 +532,14 @@ mod tests {
 		])]);
 
 		let c = pcc("component xyz {x = Gui:Window { .title = \"beep\" \n .test -> {\n1\n} }}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Component(vec!["xyz".into()], vec![
+		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
-				name: Some("x".into()),
-				what: vec!["Gui".into(), "Window".into()],
+				name: Some(id!(x)),
+				what: qid!(Gui:Window),
 				new_args: vec![],
 				children: vec![
-					HLCompSubDef::PropertySet("title".into(), HLExpr::Str("beep".to_string())),
-					HLCompSubDef::EventConnection("test".into(), HLExpr::Int(Ok(1)))
+					HLCompSubDef::PropertySet(id!(title), HLExpr::Str("beep".to_string())),
+					HLCompSubDef::EventConnection(id!(test), HLExpr::Int(Ok(1)))
 				]
 			})
 		])]);
