@@ -2,6 +2,8 @@ component CompWind {
 	count = int(0)
 
 	wnd = gui:Window {
+		.title = "Hot Test App"
+
 		gui:Box(gui:Orientation:Horizontal) {
 			.spacing = 20
 			butt0 = gui:Button {
@@ -16,6 +18,8 @@ component CompWind {
 				butt2 = gui:Button { .label = "Butt2" }
 			}
 		}
+
+		.destroy -> gui:quit()
 	}
 }
 

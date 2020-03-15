@@ -10,20 +10,10 @@ use std::cell::RefCell;
 impl SymbolTable {
 	fn add_binary_bool<F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: Symbol, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
-			&typ, name,
+			true, &typ, name,
 			&self.bool_type.clone(), &[(typ.clone(), id!("v"))],
 			f
 		)
-	}
-	fn add_simple_new<F: Fn(&Rc<RefCell<SymbolTable>>, Value) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
-		self.add_builtin_static_method(
-			&typ, id!(new),
-			&typ, &[(typ.clone(), id!("v"))],
-			move |s, _, args| f(s, args[0].clone())
-		)
-	}
-	fn add_default<F: Fn(&Rc<RefCell<SymbolTable>>) -> Value + 'static>(&mut self, typ: Type, f: F) -> Result<(), SymTabError> {
-		self.add_builtin_static_method(&typ, id!(default), &typ, &[], move |s, _, _| f(s))
 	}
 }
 
@@ -76,6 +66,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Real) => { real_() };
 		(Bool) => { bool_() };
 		(Str) => { str_() };
+		(Void) => { void_() };
+		(Notifier) => { notifier };
+		(GuiBox) => { boxt };
+		(GuiButton) => { button };
+		(GuiEntry) => { entry };
+		(GuiWindow) => { window };
 	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
@@ -83,66 +79,116 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
 		($out:ident, Str, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_str(); };
+		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
+		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
+		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
+		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
+		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
+	}
+	macro_rules! convert_arg {
+		(SymbolTable, $arg:ident) => { (void_(), id!(_DUMMY)) };
+		($arg_typ:ident, $arg:ident) => { (resolve_type!($arg_typ), id!($arg)) };
+	}
+	macro_rules! load_arg {
+		($out:ident, SymbolTable, $_arg_iter:expr, $symtab:expr) => { let $out = $symtab; };
+		($out:ident, $ty:ident, $arg_iter:expr, $_symtab:expr) => { unpack_type!($out, $ty, $arg_iter.next().unwrap()); };
 	}
 	macro_rules! pack_type {
-		(IntI32, $e:expr) => { Value::Int($e) };
+		(IntI32, $e:expr) => { Value::Int($e.into()) };
 		(Int, $e:expr) => { Value::Int($e) };
 		(Real, $e:expr) => { Value::Real($e) };
 		(Bool, $e:expr) => { Value::Bool($e) };
 		(Str, $e:expr) => { Obj::Str($e).to_heap() };
+		(Void, $_:tt) => { Value::Void };
+		(Notifier, $e:expr) => { $e.to_heap() };
+		(GuiBox, $e:expr) => { $e };
+		(GuiButton, $e:expr) => { $e };
+		(GuiEntry, $e:expr) => { $e };
+		(GuiWindow, $e:expr) => { $e };
 	}
 
-	macro_rules! export_notifier {
-		($typ:expr, $enum_id:ident, $rust_name:ident, $getter_id:ident) => {
-			symtab.add_builtin_method(
-				&$typ, id!($getter_id), &notifier, &[],
-				move |_, _, args| {
-					match &*args[0].borrow_obj().unwrap() {
-						Obj::$enum_id { $rust_name, .. } => $rust_name.clone(),
-						_ => unreachable!()
-					}
-				}
-			)?;
-		};
-	}
-
-	macro_rules! export_obj_getter {
-		($obj_typ:expr, $value_typ:ident, $field_id:ident, |$arg:ident| $code:expr) => {
-			symtab.add_builtin_method(
-				&$obj_typ, id!($field_id), &resolve_type!($value_typ), &[],
-				move |_, _, args| {
-					let $arg = args[0].borrow_obj().unwrap();
+	macro_rules! export {
+		// Function without parameters
+		($ret_typ:ident, $qid:expr, || $code:expr) => {
+			symtab.add_builtin_function(
+				$qid, &resolve_type!($ret_typ),
+				&[],
+				move |_, _, _| {
+					#[allow(unused_variables)]
 					let result = $code;
-					pack_type!($value_typ, result)
+					pack_type!($ret_typ, result)
 				}
 			)?;
 		};
-	}
-
-	macro_rules! export_obj_setter {
-		($obj_typ:expr, $value_typ:ident, $field_id:ident, |$obj:ident, $value:ident| $code:expr) => {
-			let s: Symbol = id!($field_id);
-			symtab.add_builtin_method(
-				&$obj_typ, id!(s.to_string() + "="), &void_(), &[(resolve_type!($value_typ), id!(value))],
+		// Function with parameters
+		($ret_typ:ident, $qid:expr, |$($arg:ident : $arg_typ:ident),*| $code:expr) => {
+			symtab.add_builtin_function(
+				$qid, &resolve_type!($ret_typ),
+				&[ $( (resolve_type!($arg_typ), id!($arg)) ),* ],
 				move |_, _, args| {
-					let $obj = args[0].borrow_obj().unwrap();
-					unpack_type!($value, $value_typ, args[1]);
-					$code;
-					Value::Void
+					let mut arg_iter = args.iter();
+					$( unpack_type!($arg, $arg_typ, arg_iter.next().unwrap());)*
+					#[allow(unused_variables)]
+					let result = $code;
+					pack_type!($ret_typ, result)
 				}
 			)?;
 		};
-	}
-
-	macro_rules! export_binary {
-		($ret_typ: ident, $typ:ident, $method_id:expr, |$a:ident, $b:ident| $code:expr) => {
+		// Static method without parameters
+		($ret_typ:ident, $typ:ident, $name:tt, || $code:expr) => {
 			symtab.add_builtin_method(
-				&resolve_type!($typ), id!($method_id),
-				&resolve_type!($ret_typ),
-				&[(resolve_type!($typ), id!(other))],
+				false,
+				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&[],
+				move |_, _, _| {
+					#[allow(unused_variables)]
+					let result = $code;
+					pack_type!($ret_typ, result)
+				}
+			)?;
+		};
+		// Static method with parameters
+		($ret_typ:ident, $typ:ident, $name:tt, |$($arg:ident : $arg_typ:ident),*| $code:expr) => {
+			symtab.add_builtin_method(
+				false,
+				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&[ $( convert_arg!($arg_typ, $arg) ),* ],
+				#[allow(unused_variables)]
+				move |symtab, _, args| {
+					#[allow(unused_mut)]
+					let mut arg_iter = args.iter();
+					$( load_arg!($arg, $arg_typ, arg_iter, symtab);)*
+					let result = $code;
+					pack_type!($ret_typ, result)
+				}
+			)?;
+		};
+		// Method without parameters
+		($ret_typ:ident, $typ:ident, $name:tt, |$this: ident| $code:expr) => {
+			symtab.add_builtin_method(
+				true,
+				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&[],
 				move |_, _, args| {
-					unpack_type!($a, $typ, args[0]);
-					unpack_type!($b, $typ, args[1]);
+					unpack_type!($this, $typ, args[0]);
+					#[allow(unused_variables)]
+					let result = $code;
+					pack_type!($ret_typ, result)
+				}
+			)?;
+		};
+		// Method with parameters
+		($ret_typ:ident, $typ:ident, $name:tt, |$this: ident, $($arg:ident : $arg_typ:ident),*| $code:expr) => {
+			symtab.add_builtin_method(
+				true,
+				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&[ $( convert_arg!($arg_typ, $arg) ),* ],
+				#[allow(unused_variables)]
+				move |symtab, _, args| {
+					#[allow(unused_mut)]
+					let mut arg_iter = args.iter();
+					unpack_type!($this, $typ, arg_iter.next().unwrap());
+					$( load_arg!($arg, $arg_typ, arg_iter, symtab);)*
 					let result = $code;
 					pack_type!($ret_typ, result)
 				}
@@ -150,10 +196,66 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 	}
 
+	macro_rules! extract_notifier {
+		($enum_id:ident, $notifier_id:ident, $val:expr) => {
+			match &*$val.borrow_obj().unwrap() {
+				Obj::$enum_id { $notifier_id, .. } => $notifier_id.clone(),
+				_ => unreachable!()
+			}
+		};
+	}
+	macro_rules! export_notifier {
+		($typ:ident, $field_name:ident, $getter_id:ident) => {
+			symtab.add_builtin_method(
+				true,
+				&resolve_type!($typ), id!($getter_id), &notifier, &[],
+				move |_, _, args| extract_notifier!($typ, $field_name, args[0])
+			)?;
+		};
+	}
+	macro_rules! connect_gtk_signal {
+		($gtk_obj:expr, $gtk_method:ident, $enum_id:ident, $notifier_id:ident, $val:expr, $symtab_rc:expr) => {
+			let symtab_rc = Rc::clone(&$symtab_rc);
+			let val = $val.clone();
+			$gtk_obj.$gtk_method(move |_| {
+				let not = extract_notifier!($enum_id, $notifier_id, val);
+				call_func(&symtab_rc, qid_slice!(Notifier:notify), &[not.clone()], &[], true);
+			});
+		};
+	}
+
+	macro_rules! export_getter {
+		($obj_typ:ident, $id:ident : $typ:ident, |$this: ident| $code:expr) => {
+			export!($typ, $obj_typ, $id, |$this| $code);
+		};
+	}
+	macro_rules! export_setter {
+		($obj_typ:ident, |$this: ident, $id:ident : $typ:ident| $code:expr) => {
+			let id: Symbol = id!($id);
+			export!(Void, $obj_typ, (id.to_string() + "="), |$this, $id : $typ| $code);
+		};
+	}
+	macro_rules! connect_gtk_property {
+		($obj_typ:ident, $id:ident: Str, $get_id:ident, $set_id:ident) => {
+			export_getter!($obj_typ, $id: Str, |this| this.$get_id().unwrap().to_string());
+			export_setter!($obj_typ, |this, $id: Str| this.$set_id($id));
+		};
+		($obj_typ:ident, $id:ident : $prop_typ:ident, $get_id:ident, $set_id:ident) => {
+			export_getter!($obj_typ, $id: $prop_typ, |this| this.$get_id());
+			export_setter!($obj_typ, |this, $id: $prop_typ| this.$set_id($id));
+		};
+	}
+
+	macro_rules! export_binary {
+		($ret_typ: ident, $typ:ident, $method_id:expr, |$a:ident, $b:ident| $code:expr) => {
+			export!($ret_typ, $typ, $method_id, |$a, $b : $typ| $code);
+		};
+	}
+
 	export_binary!(Bool, Bool, "op#==", |a, b| a == b);
 	export_binary!(Bool, Bool, "op#!=", |a, b| a != b);
-	symtab.add_simple_new(bool_(), move |_, v| Value::Bool(v.unchecked_bool()))?;
-	symtab.add_default(bool_(), move |_| Value::Bool(false))?;
+	export!(Bool, Bool, new, |b: Bool| b);
+	export!(Bool, Bool, default, || false);
 
 	export_binary!(Int, Int, "op#+", |a, b| a + b);
 	export_binary!(Int, Int, "op#-", |a, b| a - b);
@@ -165,8 +267,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export_binary!(Bool, Int, "op#<=", |a, b| a <= b);
 	export_binary!(Bool, Int, "op#>", |a, b| a > b);
 	export_binary!(Bool, Int, "op#>=", |a, b| a >= b);
-	symtab.add_simple_new(int_(), move |_, v| Value::Int(v.unchecked_int()))?;
-	symtab.add_default(int_(), move |_| Value::Int(0))?;
+	export!(Int, Int, new, |i: Int| i);
+	export!(Int, Int, default, || 0);
 
 	export_binary!(Real, Real, "op#+", |a, b| a + b);
 	export_binary!(Real, Real, "op#-", |a, b| a - b);
@@ -178,8 +280,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export_binary!(Bool, Real, "op#<=", |a, b| a <= b);
 	export_binary!(Bool, Real, "op#>", |a, b| a > b);
 	export_binary!(Bool, Real, "op#>=", |a, b| a >= b);
-	symtab.add_simple_new(real_(), move |_, v| Value::Real(v.unchecked_real()))?;
-	symtab.add_default(real_(), move |_| Value::Real(0.))?;
+	export!(Real, Real, new, |r: Real| r);
+	export!(Real, Real, default, || 0.);
 
 	export_binary!(Str, Str, "op#+", |a, b| {
 		let mut s = String::with_capacity(a.len() + b.len());
@@ -188,44 +290,21 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		s
 	});
 
-	symtab.add_builtin_function(
-		qid!(str:from), &str_(), &[(bool_(), id!(v))],
-		move |_, _, args| Obj::Str(args[0].unchecked_bool().to_string()).to_heap()
-	)?;
-	symtab.add_builtin_function(
-		qid!(str:from), &str_(), &[(int_(), id!(v))],
-		move |_, _, args| Obj::Str(args[0].unchecked_int().to_string()).to_heap()
-	)?;
-	symtab.add_builtin_function(
-		qid!(str:from), &str_(), &[(real_(), id!(v))],
-		move |_, _, args| Obj::Str(args[0].unchecked_real().to_string()).to_heap()
-	)?;
-	symtab.add_simple_new(str_(), move |_, s| Obj::Str(s.borrow_obj().unwrap().unchecked_str().clone()).to_heap())?;
-	symtab.add_default(str_(), move |_| Obj::Str("".to_string()).to_heap())?;
+	export!(Str, Str, from, |v: Bool| v.to_string());
+	export!(Str, Str, from, |v: Int| v.to_string());
+	export!(Str, Str, from, |v: Real| v.to_string());
+	export!(Str, Str, new, |s: Str| s.to_string());
+	export!(Str, Str, default, || "".to_string());
 
-	symtab.add_builtin_function(
-		qid!(print), &void_(), &[],
-		move |_, _, _| { print!("\n"); Value::Void }
-	)?;
-	symtab.add_builtin_function(
-		qid!(print), &void_(), &[(int_(), id!(v))],
-		move |_, _, args| { print!("{}", args[0].unchecked_int()); Value::Void }
-	)?;
-	symtab.add_builtin_function(
-		qid!(print), &void_(), &[(real_(), id!(v))],
-		move |_, _, args| { print!("{}", args[0].unchecked_real()); Value::Void }
-	)?;
-	symtab.add_builtin_function(
-		qid!(print), &void_(), &[(str_(), id!(v))],
-		move |_, _, args| { print!("{}", args[0].borrow_obj().unwrap().unchecked_str()); Value::Void }
-	)?;
+	export!(Void, qid!(print), || print!("\n"));
+	export!(Void, qid!(print), |i: Int| print!("{}", i));
+	export!(Void, qid!(print), |r: Real| print!("{}", r));
+	export!(Void, qid!(print), |s: Str| print!("{}", s));
 
-	symtab.add_builtin_static_method(
-		&notifier, id!(new), &notifier, &[],
-		move |_, _, _| Obj::Notifier(vec![]).to_heap()
-	)?;
+	// These need special access that the macros don't provide
+	export!(Notifier, Notifier, new, || Obj::Notifier(vec![]));
 	symtab.add_builtin_method(
-		&notifier, id!(connect), &void_(), &[(any_(), id!(target)), (str_(), id!(funcname))],
+		true, &notifier, id!(connect), &void_(), &[(any_(), id!(target)), (str_(), id!(funcname))],
 		move |_, arg_types, args| {
 			let mut notifier = args[0].borrow_obj_mut().unwrap();
 			let target_type = arg_types[0].clone();
@@ -236,117 +315,83 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			Value::Void
 		}
 	)?;
-	symtab.add_builtin_method(
-		&notifier, id!(notify), &void_(), &[],
-		move |symtab, _, args| {
-			let notifier = args[0].borrow_obj().unwrap();
-			for (target, func_qid) in notifier.unchecked_notifier() {
-				call_func(symtab, func_qid, &[target.clone()], &[], true);
-			}
-			Value::Void
+	export!(Void, Notifier, notify, |this, symtab: SymbolTable| {
+		for (target, func_qid) in this {
+			call_func(symtab, func_qid, &[target.clone()], &[], true);
 		}
-	)?;
+	});
 
 
-	symtab.add_builtin_function(
-		qid!(gui:init), &void_(), &[],
-		move |_, _, _args| { gtk::init().expect("GTK init failed"); Value::Void }
-	)?;
-	symtab.add_builtin_function(
-		qid!(gui:run), &void_(), &[],
-		move |_, _, _args| { gtk::main(); Value::Void }
-	)?;
+	export!(Void, qid!(gui:init), || gtk::init().expect("GTK init failed"));
+	export!(Void, qid!(gui:run), || gtk::main());
+	export!(Void, qid!(gui:quit), || gtk::main_quit());
 
 	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
 	orientation_c.insert(id!(Horizontal), SymTabNode::new_constant(orientation.clone(), Value::Enum(0, vec![])));
 	orientation_c.insert(id!(Vertical), SymTabNode::new_constant(orientation.clone(), Value::Enum(1, vec![])));
 	inject_enum_type(&mut symtab, orientation.clone(), false)?;
 
-	symtab.add_builtin_static_method(
-		&button, id!(new), &button, &[],
-		move |symtab_rc, _, _args| {
-			let button = gtk::Button::new();
-			let clicked_notifier = Obj::Notifier(vec![]).to_heap();
-			let val = Obj::GuiButton { button: button.clone(), clicked_notifier }.to_heap();
-			let symtab_rc = Rc::clone(&symtab_rc);
+	// ****************************************
+	// GuiButton
+	export!(GuiButton, GuiButton, new, |symtab: SymbolTable| {
+		let button = gtk::Button::new();
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiButton { button: button.clone(), clicked_notifier }.to_heap();
+		connect_gtk_signal!(button, connect_clicked, GuiButton, clicked_notifier, val, symtab);
+		val
+	});
+	export_notifier!(GuiButton, clicked_notifier, _n_clicked);
+	connect_gtk_property!(GuiButton, label: Str, get_label, set_label);
 
-			let val_ = val.clone();
-			button.connect_clicked(move |_| {
-				match &*val_.borrow_obj().unwrap() {
-					Obj::GuiButton { clicked_notifier, .. } => {
-						call_func(&symtab_rc, qid_slice!(Notifier:notify), &[clicked_notifier.clone()], &[], true);
-					},
-					_ => unreachable!()
-				}
-			});
-
-			val
-		}
-	)?;
-	export_notifier!(button, GuiButton, clicked_notifier, _n_clicked);
+	// ****************************************
+	// GuiBox
 	symtab.add_builtin_method(
-		&button, id!("label="), &void_(), &[(str_(), id!(s))],
-		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
-	)?;
-
-
-	symtab.add_builtin_static_method(
-		&entry, id!(new), &entry, &[],
-		move |symtab_rc, _, _args| {
-			let entry = gtk::Entry::new();
-			let changed_notifier = Obj::Notifier(vec![]).to_heap();
-			let val = Obj::GuiEntry { entry: entry.clone(), changed_notifier }.to_heap();
-			let symtab_rc = Rc::clone(&symtab_rc);
-
-			let val_ = val.clone();
-			entry.connect_changed(move |_| {
-				match &*val_.borrow_obj().unwrap() {
-					Obj::GuiEntry { changed_notifier, .. } => {
-						call_func(&symtab_rc, qid_slice!(Notifier:notify), &[changed_notifier.clone()], &[], true);
-					},
-					_ => unreachable!()
-				}
-			});
-
-			val
-		}
-	)?;
-	export_notifier!(entry, GuiEntry, changed_notifier, _n_text);
-	export_obj_getter!(entry, Str, text, |o| o.unchecked_gtk_entry().get_text().unwrap().to_string());
-	export_obj_setter!(entry, Str, text, |o,s| o.unchecked_gtk_entry().set_text(s));
-
-	symtab.add_builtin_static_method(
-		&window, id!(new), &window, &[],
-		move |_, _, _args| Obj::GuiWindow(gtk::Window::new(gtk::WindowType::Toplevel)).to_heap()
-	)?;
-	symtab.add_builtin_method(
-		&window, id!(show), &void_(), &[],
-		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_window().show_all(); Value::Void }
-	)?;
-
-	symtab.add_builtin_static_method(
-		&boxt, id!(new), &boxt, &[(orientation.clone(), id!(orientation))],
+		false, &boxt, id!(new), &boxt, &[(orientation.clone(), id!(orientation))],
 		move |_, _, args| {
 			let orient = match args[0].unchecked_enum_index() {
 				0 => gtk::Orientation::Horizontal,
 				1 => gtk::Orientation::Vertical,
 				_ => panic!("unknown Orientation")
 			};
-			Obj::GuiBox(gtk::Box::new(orient, 0)).to_heap()
+			Obj::GuiBox { box_: gtk::Box::new(orient, 0) }.to_heap()
 		}
 	)?;
-	export_obj_setter!(boxt, IntI32, spacing, |o,s| o.unchecked_gtk_box().set_spacing(s));
-	symtab.add_builtin_method(
-		&boxt, id!("spacing="), &int_(), &[],
-		move |_, _, args| Value::Int(args[0].borrow_obj().unwrap().unchecked_gtk_box().get_spacing().into())
-	)?;
+	export_getter!(GuiBox, spacing: IntI32, |this| this.get_spacing());
+	export_setter!(GuiBox, |this, spacing: IntI32| this.set_spacing(spacing));
 
+	// ****************************************
+	// GuiEntry
+	export!(GuiEntry, GuiEntry, new, |symtab: SymbolTable| {
+		let entry = gtk::Entry::new();
+		let changed_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiEntry { entry: entry.clone(), changed_notifier }.to_heap();
+		connect_gtk_signal!(entry, connect_changed, GuiEntry, changed_notifier, val, symtab);
+		val
+	});
+	export_notifier!(GuiEntry, changed_notifier, _n_text);
+	connect_gtk_property!(GuiEntry, text: Str, get_text, set_text);
+
+	// ****************************************
+	// GuiWindow
+	export!(GuiWindow, GuiWindow, new, |symtab: SymbolTable| {
+		let window = gtk::Window::new(gtk::WindowType::Toplevel);
+		let destroy_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiWindow { window: window.clone(), destroy_notifier }.to_heap();
+		connect_gtk_signal!(window, connect_destroy, GuiWindow, destroy_notifier, val, symtab);
+		val
+	});
+	export_notifier!(GuiWindow, destroy_notifier, _n_destroy);
+	export!(Void, GuiWindow, show, |this| this.show_all() );
+	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
+
+
+	// Repetitive container-adding methods
 	let container_parents = vec![window.clone(), boxt.clone()];
 	let container_children = vec![boxt.clone(), button.clone(), entry.clone()];
 	for parent in &container_parents {
 		for child in &container_children {
 			symtab.add_builtin_method(
-				&parent, id!(add_child), &void_(), &[(child.clone(), id!(child))],
+				true, &parent, id!(add_child), &void_(), &[(child.clone(), id!(child))],
 				move |_, _, args| {
 					let parent_obj = args[0].borrow_obj().unwrap();
 					let child_obj = args[1].borrow_obj().unwrap();
@@ -361,12 +406,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 }
 
 pub fn inject_wrap_type(symtab: &mut SymbolTable, wrap_type: Type, target_type: Type) -> Result<(), SymTabError> {
-	symtab.add_builtin_static_method(
-		&wrap_type, id!(wrap), &wrap_type, &[(target_type.clone(), id!(v))],
+	symtab.add_builtin_method(
+		false, &wrap_type, id!(wrap), &wrap_type, &[(target_type.clone(), id!(v))],
 		move |_, _, args| args[0].clone()
 	)?;
 	symtab.add_builtin_method(
-		&wrap_type, id!(unwrap), &target_type, &[],
+		true, &wrap_type, id!(unwrap), &target_type, &[],
 		move |_, _, args| args[0].clone()
 	)?;
 	Ok(())
@@ -374,7 +419,7 @@ pub fn inject_wrap_type(symtab: &mut SymbolTable, wrap_type: Type, target_type: 
 
 pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -> Result<(), SymTabError> {
 	symtab.add_builtin_method(
-		&typ, id!(discriminant), &symtab.int_type.clone(), &[],
+		true, &typ, id!(discriminant), &symtab.int_type.clone(), &[],
 		move |_, _, args| { Value::Int(args[0].unchecked_enum_index().try_into().unwrap()) }
 	)?;
 	if !has_fields {
@@ -387,7 +432,7 @@ pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -
 pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, Symbol)], rename_setters: bool) -> Result<(), SymTabError> {
 	for (idx, (ftyp, fid)) in fields.iter().enumerate() {
 		symtab.add_builtin_method(
-			&typ, *fid, ftyp, &[],
+			true, &typ, *fid, ftyp, &[],
 			move |_, _, args| args[0].borrow_obj().unwrap().unchecked_record()[idx].clone()
 		)?;
 		let setter_name = id!(match rename_setters {
@@ -395,7 +440,7 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 			false => fid.to_string() + "="
 		});
 		symtab.add_builtin_method(
-			&typ, setter_name, &symtab.void_type.clone(), &[(ftyp.clone(), id!(v))],
+			true, &typ, setter_name, &symtab.void_type.clone(), &[(ftyp.clone(), id!(v))],
 			move |_, _, args| { args[0].borrow_obj_mut().unwrap().unchecked_record_mut()[idx] = args[1].clone(); Value::Void }
 		)?;
 	}
@@ -403,8 +448,8 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 	// TODO: only create 'default' for records that are all default types?
 	//   (although, this might cause issues as default methods can be defined later...)
 	let typ_ = typ.clone();
-	symtab.add_builtin_static_method(
-		&typ, id!(default), &typ, &[],
+	symtab.add_builtin_method(
+		false, &typ, id!(default), &typ, &[],
 		move |symtab, _, _args| {
 			let tbody = typ_.borrow();
 			let fields = tbody.unchecked_record_fields();
@@ -419,8 +464,8 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 		}
 	)?;
 
-	symtab.add_builtin_static_method(
-		&typ, id!(build), &typ, &fields,
+	symtab.add_builtin_method(
+		false, &typ, id!(build), &typ, &fields,
 		move |_, _, args| Obj::Record(args.to_vec()).to_heap()
 	)?;
 

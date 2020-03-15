@@ -43,6 +43,10 @@ macro_rules! qid_combine {
 
 pub type QualID = Vec<Symbol>;
 
+lazy_static! {
+	pub static ref DUMMY_ARG: Symbol = id!("_DUMMY");
+}
+
 // High Level Expressions:
 // This maps closely to the Causson source code
 #[derive(Debug, Clone, PartialEq)]
@@ -439,20 +443,17 @@ impl SymbolTable {
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
-	pub fn add_builtin_static_method<F>(&mut self, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
+	pub fn add_builtin_method<F>(&mut self, has_self: bool, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
-		self.add_builtin_fn(false, qid_combine!(&typ.name, name), return_type, args, func)
-	}
-	pub fn add_builtin_method<F>(&mut self, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
-	{
-		self.add_builtin_fn(true, qid_combine!(&typ.name, name), return_type, args, func)
+		self.add_builtin_fn(has_self, qid_combine!(&typ.name, name), return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
 	{
-		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), args.to_vec(), func))
+		let dummy: Symbol = *DUMMY_ARG; // rustc is bad sometimes
+		let cleaned_args: Vec<(Type, Symbol)> = args.iter().cloned().filter(|(_, s)| dummy != *s).collect();
+		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), cleaned_args, func))
 	}
 
 	pub fn add_function(&mut self, func: Function) -> Result<(), SymTabError> {

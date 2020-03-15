@@ -368,8 +368,8 @@ impl ParseContext {
 						let c = Value::Enum(i, vec![]);
 						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(typ.clone(), c));
 					} else {
-						symtab.add_builtin_static_method(
-							&typ, *val_id, &typ, &fields,
+						symtab.add_builtin_method(
+							false, &typ, *val_id, &typ, &fields,
 							move |_, _, args| { Value::Enum(i, args.to_vec()) }
 						)?;
 					}

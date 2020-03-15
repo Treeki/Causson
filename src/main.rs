@@ -1,4 +1,5 @@
 #![feature(box_patterns)]
+#![feature(trace_macros)]
 
 extern crate pest;
 #[macro_use]

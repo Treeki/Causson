@@ -12,10 +12,10 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
-	GuiBox(gtk::Box),
+	GuiBox { box_ : gtk::Box },
 	GuiButton { button: gtk::Button, clicked_notifier: Value },
 	GuiEntry { entry: gtk::Entry, changed_notifier: Value },
-	GuiWindow(gtk::Window),
+	GuiWindow { window: gtk::Window, destroy_notifier: Value },
 	Notifier(Vec<(Value, Vec<Symbol>)>)
 }
 
@@ -58,32 +58,32 @@ impl Obj {
 	}
 	pub fn unchecked_gtk_window(&self) -> &gtk::Window {
 		match self {
-			Obj::GuiWindow(w) => w,
+			Obj::GuiWindow { window, .. } => window,
 			_ => panic!("GuiWindow heapobj expected")
 		}
 	}
 
 	pub fn unchecked_gtk_container(&self) -> &gtk::Container {
 		match self {
-			Obj::GuiBox(b) => b.upcast_ref(),
-			Obj::GuiWindow(w) => w.upcast_ref(),
+			Obj::GuiBox { box_, .. } => box_.upcast_ref(),
+			Obj::GuiWindow { window, .. } => window.upcast_ref(),
 			_ => panic!("gtk::Container heapobj expected")
 		}
 	}
 
 	pub fn unchecked_gtk_box(&self) -> &gtk::Box {
 		match self {
-			Obj::GuiBox(b) => b,
+			Obj::GuiBox { box_, .. } => box_,
 			_ => panic!("gtk::Box heapobj expected")
 		}
 	}
 
 	pub fn unchecked_gtk_widget(&self) -> &gtk::Widget {
 		match self {
-			Obj::GuiBox(b) => b.upcast_ref(),
+			Obj::GuiBox { box_, .. } => box_.upcast_ref(),
 			Obj::GuiButton { button, .. } => button.upcast_ref(),
 			Obj::GuiEntry { entry, .. } => entry.upcast_ref(),
-			Obj::GuiWindow(w) => w.upcast_ref(),
+			Obj::GuiWindow { window, .. } => window.upcast_ref(),
 			_ => panic!("gtk::Widget heapobj expected")
 		}
 	}
