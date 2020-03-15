@@ -5,11 +5,18 @@ type Wind = record {
 	gui:Button butt2
 }
 
+-- TODO get rid of this by adding property definitions to Component
+def int:new() -> int {
+	0
+}
+
 component CompWind {
+	count = int
+
 	wnd = gui:Window {
 		gui:Box(gui:Orientation:Horizontal) {
 			.spacing = 20
-			butt0 = gui:Button { .label = "Butt0" }
+			butt0 = gui:Button { .label = str:from(self.count) }
 
 			gui:Box(gui:Orientation:Vertical) {
 				.spacing = 10
@@ -25,6 +32,8 @@ component CompWind {
 def CompWind:test(self) -> void {
 	print("beep boop")
 	print()
+	self.count = self.count + 1
+	self._n_count.notify()
 }
 
 def main() -> void {

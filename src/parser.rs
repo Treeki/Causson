@@ -89,25 +89,34 @@ impl ParseContext {
 
 				// First step, create all the stuff we need
 				let mut instance_ids: Vec<Symbol> = vec![];
+				let mut notifier_ids: Vec<Symbol> = vec![];
 				let mut record_fields = vec![];
 				let mut new_frag = vec![];
+				let mut prop_update_methods: Vec<Symbol> = vec![];
+				let mut prop_updates: Vec<(Symbol, HLExpr, Symbol)> = vec![];
 
 				for (index, instance) in instances.iter().enumerate() {
-					let instance_id = match instance.name {
-						Some(field_name) => field_name,
-						None => format!("_f_{}", index).into()
+					let (instance_id, notifier_id) = match instance.name {
+						Some(field_name) => (field_name, format!("_n_{}", field_name).into()),
+						None => (format!("_f_{}", index).into(), format!("_n_{}", index).into())
 					};
 					instance_ids.push(instance_id);
+					notifier_ids.push(notifier_id);
 
 					// Add a new field to the record
 					record_fields.push((instance.what.clone(), instance_id));
+					record_fields.push((vec!["Notifier".into()], notifier_id));
 
-					// Initialise this in our 'new' function
+					// Initialise these in our 'new' function
 					let mut instance_new_qid = instance.what.clone();
 					instance_new_qid.push("new".into());
 					let instance_new_expr = HLExpr::ID(instance_new_qid);
 					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), instance.new_args.clone());
 					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
+
+					let notifier_new_expr = HLExpr::ID(vec!["Notifier".into(), "new".into()]);
+					let notifier_expr = HLExpr::Call(Box::new(notifier_new_expr), vec![]);
+					new_frag.push(HLExpr::Let(notifier_id, Box::new(notifier_expr)));
 				}
 
 				// Assemble the hierarchy
@@ -122,6 +131,67 @@ impl ParseContext {
 					total
 				}
 
+				fn scan_dependencies(expr: &HLExpr) -> Result<Vec<(HLExpr, Symbol)>> {
+					fn _directly_involves_self(expr: &HLExpr) -> bool {
+						use HLExpr::*;
+						match expr {
+							ID(sym) => sym.len() == 1 && sym[0] == "self",
+							PropAccess(subexpr, _) => _directly_involves_self(&subexpr),
+							_ => false
+						}
+					}
+
+					fn _recursive_scan(output: &mut Vec<(HLExpr, Symbol)>, expr: &HLExpr, is_call_target: bool) -> Result<()> {
+						use HLExpr::*;
+						match expr {
+							ID(_) => (),
+							Binary(l, _, r) => {
+								_recursive_scan(output, &l, false)?;
+								_recursive_scan(output, &r, false)?;
+							}
+							PropAccess(subexpr, sym) => {
+								if is_call_target {
+									_recursive_scan(output, &subexpr, false)?;
+								} else {
+									if _directly_involves_self(&subexpr) {
+										output.push((*subexpr.clone(), *sym));
+									}
+								}
+							}
+							Call(target, args) => {
+								_recursive_scan(output, &target, true)?;
+								for arg in args {
+									_recursive_scan(output, &arg, false)?;
+								}
+							}
+							If(cond, t, f) => {
+								_recursive_scan(output, &cond, false)?;
+								_recursive_scan(output, &t, false)?;
+								if let Some(f) = f {
+									_recursive_scan(output, &f, false)?;
+								}
+							}
+							Let(_, subexpr) => _recursive_scan(output, &subexpr, false)?,
+							CodeBlock(subexprs) => {
+								for subexpr in subexprs {
+									_recursive_scan(output, &subexpr, false)?;
+								}
+							}
+							Int(_) => (),
+							Real(_) => (),
+							Bool(_) => (),
+							Str(_) => ()
+						}
+						Ok(())
+					}
+
+					let mut result = vec![];
+					_recursive_scan(&mut result, expr, false)?;
+					Ok(result)
+				}
+
+				let mut next_updater_id = 0;
+
 				for (index, instance) in instances.iter().enumerate() {
 					let mut sub_index = index + 1;
 					for subdef in &instance.children {
@@ -135,20 +205,72 @@ impl ParseContext {
 							},
 							HLCompSubDef::PropertySet(prop_id, value_expr) => {
 								// TODO: dynamic properties
-								let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
-								let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
-								let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
-								new_frag.push(set_expr);
+								let deps = scan_dependencies(value_expr)?;
+								println!("DEPS FOR {:?}: {:?}", prop_id, deps);
+								if deps.is_empty() {
+									// Static property, assign on construction
+									let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
+									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
+									let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
+									new_frag.push(set_expr);
+								} else {
+									// Make a method
+									let updater_sym = format!("_upd_{}", next_updater_id).into();
+									next_updater_id += 1;
+
+									let self_expr = HLExpr::ID(vec!["self".into()]);
+									let parent_expr = HLExpr::PropAccess(Box::new(self_expr), instance_ids[index]);
+									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
+									let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
+
+									let mut updater_qid = comp_id.clone();
+									updater_qid.push(updater_sym);
+									extra_defs.push(GlobalDef::Func(
+										updater_qid,
+										FuncType::Method,
+										vec![],
+										vec!["void".into()],
+										set_expr
+									));
+
+									prop_update_methods.push(updater_sym);
+									for (dep_obj, dep_prop) in deps {
+										prop_updates.push((updater_sym, dep_obj, dep_prop));
+									}
+								}
 							}
 						}
 					}
 				}
 
-				// Build the record containing all fields
+				let result_sym = "self".into();
+
+				// self = Type:build(...)
 				let mut build_qid = comp_id.clone();
 				build_qid.push("build".into());
-				let field_id_exprs = instance_ids.iter().map(|i| HLExpr::ID(vec![*i])).collect();
-				new_frag.push(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs));
+				let field_id_exprs = record_fields.iter().map(|(_, i)| HLExpr::ID(vec![*i])).collect();
+				new_frag.push(HLExpr::Let(result_sym, Box::new(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs))));
+
+				// Update all dynamic properties
+				for upd in prop_update_methods {
+					let self_expr = HLExpr::ID(vec![result_sym]);
+					let upd_expr = HLExpr::PropAccess(Box::new(self_expr), upd);
+					new_frag.push(HLExpr::Call(Box::new(upd_expr), vec![]));
+				}
+
+				// Connect all notifiers
+				for (upd, dep_obj, dep_prop) in prop_updates {
+					println!("upd:{:?} dep_obj:{:?} dep_prop:{:?}", upd, dep_obj, dep_prop);
+					let notifier_sym = format!("_n_{}", dep_prop).into();
+					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_sym);
+					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), "connect".into());
+					let self_expr = HLExpr::ID(vec![result_sym]);
+					let upd_expr = HLExpr::Str(upd.to_string());
+					new_frag.push(HLExpr::Call(Box::new(connect_expr), vec![self_expr, upd_expr]));
+				}
+
+				// Finally, return self
+				new_frag.push(HLExpr::ID(vec![result_sym]));
 
 				let mut new_qid = comp_id.clone();
 				new_qid.push("new".into());
