@@ -127,7 +127,7 @@ fn parse_type_def(pair: Pair) -> HLTypeDef {
 		},
 		Rule::recordDef => {
 			let fields = pair.into_inner().map(parse_typed_id).collect();
-			HLTypeDef::Record(fields)
+			HLTypeDef::Record { fields, rename_setters: false }
 		},
 		_ => unreachable!()
 	}
@@ -307,21 +307,25 @@ mod tests {
 
 	#[test]
 	fn test_record_type() {
+		fn build_rec(fields: Vec<(QualID, Symbol)>) -> HLTypeDef {
+			HLTypeDef::Record { fields, rename_setters: false }
+		}
+
 		let x_qid = vec!["x".into()];
 		let int_a = (vec!["int".into()], "a".into());
 		let real_b = (vec!["real".into()], "b".into());
 		let xyz_c = (vec!["xyz".into()], "c".into());
 
 		let c = pcc("type x = record { int a, real b }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![int_a.clone(), real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![int_a.clone(), real_b.clone()]))]);
 		let c = pcc("type x = record { real b }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record {\nreal b\n}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record {real b,}").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![real_b.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![real_b.clone()]))]);
 		let c = pcc("type x = record { int a\nreal b, xyz c\n }").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), HLTypeDef::Record(vec![int_a.clone(), real_b.clone(), xyz_c.clone()]))]);
+		assert_eq!(c, vec![GlobalDef::Type(x_qid.clone(), build_rec(vec![int_a.clone(), real_b.clone(), xyz_c.clone()]))]);
 	}
 
 	#[test]

@@ -215,7 +215,7 @@ impl ParseContext {
 									new_frag.push(set_expr);
 								} else {
 									// Make a method
-									let updater_sym = format!("_upd_{}", next_updater_id).into();
+									let updater_id = format!("_upd_{}", next_updater_id).into();
 									next_updater_id += 1;
 
 									let self_expr = HLExpr::ID(vec!["self".into()]);
@@ -224,7 +224,7 @@ impl ParseContext {
 									let set_expr = HLExpr::Binary(Box::new(prop_expr), "=".into(), Box::new(value_expr.clone()));
 
 									let mut updater_qid = comp_id.clone();
-									updater_qid.push(updater_sym);
+									updater_qid.push(updater_id);
 									extra_defs.push(GlobalDef::Func(
 										updater_qid,
 										FuncType::Method,
@@ -233,9 +233,9 @@ impl ParseContext {
 										set_expr
 									));
 
-									prop_update_methods.push(updater_sym);
+									prop_update_methods.push(updater_id);
 									for (dep_obj, dep_prop) in deps {
-										prop_updates.push((updater_sym, dep_obj, dep_prop));
+										prop_updates.push((updater_id, dep_obj, dep_prop));
 									}
 								}
 							}
@@ -243,17 +243,17 @@ impl ParseContext {
 					}
 				}
 
-				let result_sym = "self".into();
+				let result_id = "self".into();
 
 				// self = Type:build(...)
 				let mut build_qid = comp_id.clone();
 				build_qid.push("build".into());
 				let field_id_exprs = record_fields.iter().map(|(_, i)| HLExpr::ID(vec![*i])).collect();
-				new_frag.push(HLExpr::Let(result_sym, Box::new(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs))));
+				new_frag.push(HLExpr::Let(result_id, Box::new(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs))));
 
 				// Update all dynamic properties
 				for upd in prop_update_methods {
-					let self_expr = HLExpr::ID(vec![result_sym]);
+					let self_expr = HLExpr::ID(vec![result_id]);
 					let upd_expr = HLExpr::PropAccess(Box::new(self_expr), upd);
 					new_frag.push(HLExpr::Call(Box::new(upd_expr), vec![]));
 				}
@@ -261,23 +261,23 @@ impl ParseContext {
 				// Connect all notifiers
 				for (upd, dep_obj, dep_prop) in prop_updates {
 					println!("upd:{:?} dep_obj:{:?} dep_prop:{:?}", upd, dep_obj, dep_prop);
-					let notifier_sym = format!("_n_{}", dep_prop).into();
-					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_sym);
+					let notifier_id = format!("_n_{}", dep_prop).into();
+					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_id);
 					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), "connect".into());
-					let self_expr = HLExpr::ID(vec![result_sym]);
+					let self_expr = HLExpr::ID(vec![result_id]);
 					let upd_expr = HLExpr::Str(upd.to_string());
 					new_frag.push(HLExpr::Call(Box::new(connect_expr), vec![self_expr, upd_expr]));
 				}
 
 				// Finally, return self
-				new_frag.push(HLExpr::ID(vec![result_sym]));
+				new_frag.push(HLExpr::ID(vec![result_id]));
 
 				let mut new_qid = comp_id.clone();
 				new_qid.push("new".into());
 
 				extra_defs.push(GlobalDef::Type(
 					comp_id.clone(),
-					HLTypeDef::Record(record_fields)
+					HLTypeDef::Record { fields: record_fields, rename_setters: true }
 				));
 				extra_defs.push(GlobalDef::Func(
 					new_qid,
@@ -286,6 +286,34 @@ impl ParseContext {
 					comp_id.clone(),
 					HLExpr::CodeBlock(new_frag)
 				));
+
+				// Last but not least, generate custom setters that call our notifiers
+				for ((instance, instance_id), notifier_id) in instances.iter().zip(instance_ids).zip(notifier_ids) {
+					let mut code = vec![];
+
+					// Write it using the renamed default setter
+					let self_expr = HLExpr::ID(vec!["self".into()]);
+					let defsetter_id = format!("_set_{}", instance_id).into();
+					let defsetter_expr = HLExpr::PropAccess(Box::new(self_expr), defsetter_id);
+					let v_expr = HLExpr::ID(vec!["v".into()]);
+					code.push(HLExpr::Call(Box::new(defsetter_expr), vec![v_expr]));
+
+					// Call the notifier
+					let self_expr = HLExpr::ID(vec!["self".into()]);
+					let notifier_expr = HLExpr::PropAccess(Box::new(self_expr), notifier_id);
+					let notify_expr = HLExpr::PropAccess(Box::new(notifier_expr), "notify".into());
+					code.push(HLExpr::Call(Box::new(notify_expr), vec![]));
+
+					let mut setter_qid = comp_id.clone();
+					setter_qid.push(format!("{}=", instance_id).into());
+					extra_defs.push(GlobalDef::Func(
+						setter_qid,
+						FuncType::Method,
+						vec![(instance.what.clone(), "v".into())],
+						vec!["void".into()],
+						HLExpr::CodeBlock(code)
+					));
+				}
 			}
 		}
 		println!("{:?}", extra_defs);
@@ -339,7 +367,7 @@ impl ParseContext {
 				stdlib::inject_enum_type(&mut symtab, typ, have_fields)?;
 				Ok(())
 			}
-			HLTypeDef::Record(fields) => {
+			HLTypeDef::Record { fields, rename_setters } => {
 				let fields = fields.iter().map(
 					|(tref, field_id)|
 					symtab.root
@@ -348,7 +376,7 @@ impl ParseContext {
 						.ok_or(ParserError::TypeIsMissing)
 						.map(|t| (t, field_id.clone()))
 				).collect::<Result<Vec<(Type, Symbol)>>>()?;
-				stdlib::inject_record_type(&mut symtab, typ.clone(), &fields)?;
+				stdlib::inject_record_type(&mut symtab, typ.clone(), &fields, *rename_setters)?;
 				*typ.borrow_mut() = TypeBody::Record(fields);
 				Ok(())
 			}

@@ -269,14 +269,18 @@ pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -
 	Ok(())
 }
 
-pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, Symbol)]) -> Result<(), SymTabError> {
+pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, Symbol)], rename_setters: bool) -> Result<(), SymTabError> {
 	for (idx, (ftyp, fid)) in fields.iter().enumerate() {
 		symtab.add_builtin_method(
 			&typ, fid, ftyp, &[],
 			move |_, _, args| args[0].borrow_obj().unwrap().unchecked_record()[idx].clone()
 		)?;
+		let setter_name = match rename_setters {
+			true =>  format!("_set_{}", fid.to_string()),
+			false => fid.to_string() + "="
+		};
 		symtab.add_builtin_method(
-			&typ, &(fid.to_string() + "="), &symtab.void_type.clone(), &[(ftyp.clone(), "v".into())],
+			&typ, &setter_name, &symtab.void_type.clone(), &[(ftyp.clone(), "v".into())],
 			move |_, _, args| { args[0].borrow_obj_mut().unwrap().unchecked_record_mut()[idx] = args[1].clone(); Value::Void }
 		)?;
 	}

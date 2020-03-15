@@ -33,7 +33,6 @@ def CompWind:test(self) -> void {
 	print("beep boop")
 	print()
 	self.count = self.count + 1
-	self._n_count.notify()
 }
 
 def main() -> void {

@@ -32,7 +32,7 @@ pub enum HLExpr {
 pub enum HLTypeDef {
 	Enum(Vec<(Symbol, Vec<(QualID, Symbol)>)>),
 	Wrap(QualID),
-	Record(Vec<(QualID, Symbol)>)
+	Record { fields: Vec<(QualID, Symbol)>, rename_setters: bool }
 }
 
 pub type FuncArg = (QualID, Symbol);
