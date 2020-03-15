@@ -48,17 +48,19 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		])
 	);
 
+	let boxt = Type::from_body(qid!(gui:Box), TypeBody::Primitive(PrimitiveType::GuiBox));
 	let button = Type::from_body(qid!(gui:Button), TypeBody::Primitive(PrimitiveType::GuiButton));
 	let entry = Type::from_body(qid!(gui:Entry), TypeBody::Primitive(PrimitiveType::GuiEntry));
+	let label = Type::from_body(qid!(gui:Label), TypeBody::Primitive(PrimitiveType::GuiLabel));
 	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
-	let boxt = Type::from_body(qid!(gui:Box), TypeBody::Primitive(PrimitiveType::GuiBox));
 
 	symtab.add_type(notifier.clone())?;
 	symtab.add_type(orientation.clone())?;
+	symtab.add_type(boxt.clone())?;
 	symtab.add_type(button.clone())?;
 	symtab.add_type(entry.clone())?;
+	symtab.add_type(label.clone())?;
 	symtab.add_type(window.clone())?;
-	symtab.add_type(boxt.clone())?;
 
 	macro_rules! resolve_type {
 		(IntI32) => { int_() };
@@ -71,6 +73,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiBox) => { boxt };
 		(GuiButton) => { button };
 		(GuiEntry) => { entry };
+		(GuiLabel) => { label };
 		(GuiWindow) => { window };
 	}
 	macro_rules! unpack_type {
@@ -83,6 +86,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
 		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
+		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
 	}
 	macro_rules! convert_arg {
@@ -104,6 +108,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiBox, $e:expr) => { $e };
 		(GuiButton, $e:expr) => { $e };
 		(GuiEntry, $e:expr) => { $e };
+		(GuiLabel, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
 	}
 
@@ -356,8 +361,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			Obj::GuiBox { box_: gtk::Box::new(orient, 0) }.to_heap()
 		}
 	)?;
-	export_getter!(GuiBox, spacing: IntI32, |this| this.get_spacing());
-	export_setter!(GuiBox, |this, spacing: IntI32| this.set_spacing(spacing));
+	connect_gtk_property!(GuiBox, spacing: IntI32, get_spacing, set_spacing);
 
 	// ****************************************
 	// GuiEntry
@@ -370,6 +374,16 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	export_notifier!(GuiEntry, changed_notifier, _n_text);
 	connect_gtk_property!(GuiEntry, text: Str, get_text, set_text);
+	// needs Option<Str>
+	// connect_gtk_property!(GuiEntry, placeholder_text: Str, get_placeholder_text, set_placeholder_text);
+	connect_gtk_property!(GuiEntry, visibility: Bool, get_visibility, set_visibility);
+
+	// ****************************************
+	// GuiLabel
+	export!(GuiLabel, GuiLabel, new, |symtab: SymbolTable| {
+		Obj::GuiLabel { label: gtk::Label::new(None) }.to_heap()
+	});
+	connect_gtk_property!(GuiLabel, text: Str, get_text, set_text);
 
 	// ****************************************
 	// GuiWindow
@@ -387,7 +401,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	// Repetitive container-adding methods
 	let container_parents = vec![window.clone(), boxt.clone()];
-	let container_children = vec![boxt.clone(), button.clone(), entry.clone()];
+	let container_children = vec![boxt.clone(), button.clone(), entry.clone(), label.clone()];
 	for parent in &container_parents {
 		for child in &container_children {
 			symtab.add_builtin_method(

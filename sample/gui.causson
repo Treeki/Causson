@@ -13,6 +13,7 @@ component CompWind {
 
 			gui:Box(gui:Orientation:Vertical) {
 				.spacing = 10
+				gui:Label { .text = "Waffle" }
 				field = gui:Entry
 				butt1 = gui:Button { .label = self.field.text }
 				butt2 = gui:Button { .label = "Butt2" }

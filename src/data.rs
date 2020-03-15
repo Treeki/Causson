@@ -15,6 +15,7 @@ pub enum Obj {
 	GuiBox { box_ : gtk::Box },
 	GuiButton { button: gtk::Button, clicked_notifier: Value },
 	GuiEntry { entry: gtk::Entry, changed_notifier: Value },
+	GuiLabel { label: gtk::Label },
 	GuiWindow { window: gtk::Window, destroy_notifier: Value },
 	Notifier(Vec<(Value, Vec<Symbol>)>)
 }
@@ -56,6 +57,12 @@ impl Obj {
 			_ => panic!("GuiEntry heapobj expected")
 		}
 	}
+	pub fn unchecked_gtk_label(&self) -> &gtk::Label {
+		match self {
+			Obj::GuiLabel { label, .. } => label,
+			_ => panic!("GuiLabel heapobj expected")
+		}
+	}
 	pub fn unchecked_gtk_window(&self) -> &gtk::Window {
 		match self {
 			Obj::GuiWindow { window, .. } => window,
@@ -83,6 +90,7 @@ impl Obj {
 			Obj::GuiBox { box_, .. } => box_.upcast_ref(),
 			Obj::GuiButton { button, .. } => button.upcast_ref(),
 			Obj::GuiEntry { entry, .. } => entry.upcast_ref(),
+			Obj::GuiLabel { label, .. } => label.upcast_ref(),
 			Obj::GuiWindow { window, .. } => window.upcast_ref(),
 			_ => panic!("gtk::Widget heapobj expected")
 		}
