@@ -2,6 +2,7 @@ use std::cell::{Ref, RefMut};
 use std::ptr::NonNull;
 use crate::gc::*;
 use crate::gtk::prelude::Cast;
+use symbol::Symbol;
 
 
 thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
@@ -13,7 +14,8 @@ pub enum Obj {
 	Record(Vec<Value>),
 	GuiBox(gtk::Box),
 	GuiButton(gtk::Button),
-	GuiWindow(gtk::Window)
+	GuiWindow(gtk::Window),
+	Notifier(Vec<(Value, Vec<Symbol>)>)
 }
 
 impl Obj {
@@ -75,6 +77,20 @@ impl Obj {
 			Obj::GuiButton(b) => b.upcast_ref(),
 			Obj::GuiWindow(w) => w.upcast_ref(),
 			_ => panic!("gtk::Widget heapobj expected")
+		}
+	}
+
+	pub fn unchecked_notifier(&self) -> &Vec<(Value, Vec<Symbol>)> {
+		match self {
+			Obj::Notifier(v) => v,
+			_ => panic!("Notifier heapobj expected")
+		}
+	}
+
+	pub fn unchecked_notifier_mut(&mut self) -> &mut Vec<(Value, Vec<Symbol>)> {
+		match self {
+			Obj::Notifier(v) => v,
+			_ => panic!("Notifier heapobj expected")
 		}
 	}
 }

@@ -212,6 +212,36 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		}
 	}
 
+	let notifier = Type::from_body(vec!["Notifier".into()], TypeBody::Primitive(PrimitiveType::Notifier));
+	symtab.add_type(notifier.clone())?;
+	symtab.add_builtin_static_method(
+		&notifier, "new", &notifier, &[],
+		move |_, _, _| Obj::Notifier(vec![]).to_heap()
+	)?;
+	symtab.add_builtin_method(
+		&notifier, "connect", &void_(), &[(any_(), "target".into()), (str_(), "funcname".into())],
+		move |_, arg_types, args| {
+			let mut notifier = args[0].borrow_obj_mut().unwrap();
+			let target_type = arg_types[0].clone();
+			let target = args[1].clone();
+			let funcname: Symbol = args[2].borrow_obj().unwrap().unchecked_str().into();
+			let mut qid = target_type.name.clone();
+			qid.push(funcname);
+			notifier.unchecked_notifier_mut().push((target, qid));
+			Value::Void
+		}
+	)?;
+	symtab.add_builtin_method(
+		&notifier, "notify", &void_(), &[],
+		move |symtab, _, args| {
+			let notifier = args[0].borrow_obj().unwrap();
+			for (target, func_qid) in notifier.unchecked_notifier() {
+				call_func(symtab, func_qid, &[target.clone()], &[], true);
+			}
+			Value::Void
+		}
+	)?;
+
 	Ok(())
 }
 

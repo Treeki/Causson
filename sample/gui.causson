@@ -18,6 +18,8 @@ component CompWind {
 			}
 		}
 	}
+
+	n = Notifier
 }
 
 def CompWind:test(self) -> void {
@@ -29,7 +31,9 @@ def main() -> void {
 	gui:init()
 	let wind = CompWind:new()
 	wind.wnd.show()
-	wind.butt0.connect_clicked(wind, "test")
+	--wind.butt0.connect_clicked(wind, "test")
+	wind.butt0.connect_clicked(wind.n, "notify")
+	wind.n.connect(wind, "test")
 	gui:run()
 }
 
