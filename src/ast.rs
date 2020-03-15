@@ -75,7 +75,7 @@ pub type Program = Vec<GlobalDef>;
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
 	Any, Void, Bool, Int, Real, Str,
-	GuiBox, GuiButton, GuiWindow, Notifier
+	GuiBox, GuiButton, GuiEntry, GuiWindow, Notifier
 }
 
 

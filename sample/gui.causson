@@ -1,10 +1,3 @@
-type Wind = record {
-	gui:Window wnd
-	gui:Box boxxo
-	gui:Button butt1
-	gui:Button butt2
-}
-
 component CompWind {
 	count = int(0)
 
@@ -13,24 +6,17 @@ component CompWind {
 			.spacing = 20
 			butt0 = gui:Button {
 				.label = str:from(self.count)
-				.clicked -> {
-					self.count = self.count + 1
-				}
+				.clicked -> self.count = self.count + 1
 			}
 
 			gui:Box(gui:Orientation:Vertical) {
 				.spacing = 10
-				butt1 = gui:Button { .label = "Butt1" }
+				field = gui:Entry
+				butt1 = gui:Button { .label = self.field.text }
 				butt2 = gui:Button { .label = "Butt2" }
 			}
 		}
 	}
-}
-
-def CompWind:test(self) -> void {
-	print("beep boop")
-	print()
-	self.count = self.count + 1
 }
 
 def main() -> void {

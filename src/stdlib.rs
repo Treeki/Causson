@@ -213,6 +213,48 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_button().set_label(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
 	)?;
 
+
+	let entry = Type::from_body(vec!["gui".into(), "Entry".into()], TypeBody::Primitive(PrimitiveType::GuiEntry));
+	symtab.add_type(entry.clone())?;
+	symtab.add_builtin_static_method(
+		&entry, "new", &entry, &[],
+		move |symtab_rc, _, _args| {
+			let entry = gtk::Entry::new();
+			let changed_notifier = Obj::Notifier(vec![]).to_heap();
+			let val = Obj::GuiEntry { entry: entry.clone(), changed_notifier }.to_heap();
+			let symtab_rc = Rc::clone(&symtab_rc);
+
+			let val_ = val.clone();
+			entry.connect_changed(move |_| {
+				match &*val_.borrow_obj().unwrap() {
+					Obj::GuiEntry { changed_notifier, .. } => {
+						call_func(&symtab_rc, &["Notifier".into(), "notify".into()], &[changed_notifier.clone()], &[], true);
+					},
+					_ => unreachable!()
+				}
+			});
+
+			val
+		}
+	)?;
+	symtab.add_builtin_method(
+		&entry, "_n_text", &notifier, &[],
+		move |_, _, args| {
+			match &*args[0].borrow_obj().unwrap() {
+				Obj::GuiEntry { changed_notifier, .. } => changed_notifier.clone(),
+				_ => unreachable!()
+			}
+		}
+	)?;
+	symtab.add_builtin_method(
+		&entry, "text", &str_(), &[],
+		move |_, _, args| { Obj::Str(args[0].borrow_obj().unwrap().unchecked_gtk_entry().get_text().unwrap().to_string()).to_heap() }
+	)?;
+	symtab.add_builtin_method(
+		&entry, "text=", &void_(), &[(str_(), "s".into())],
+		move |_, _, args| { args[0].borrow_obj().unwrap().unchecked_gtk_entry().set_text(args[1].borrow_obj().unwrap().unchecked_str()); Value::Void }
+	)?;
+
 	let window = Type::from_body(vec!["gui".into(), "Window".into()], TypeBody::Primitive(PrimitiveType::GuiWindow));
 	symtab.add_type(window.clone())?;
 	symtab.add_builtin_static_method(
@@ -247,7 +289,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	)?;
 
 	let container_parents = vec![window.clone(), boxt.clone()];
-	let container_children = vec![boxt.clone(), button.clone()];
+	let container_children = vec![boxt.clone(), button.clone(), entry.clone()];
 	for parent in &container_parents {
 		for child in &container_children {
 			symtab.add_builtin_method(
