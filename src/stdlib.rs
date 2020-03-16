@@ -511,6 +511,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	export_notifier!(GuiWindow, destroy_notifier, _n_destroy);
 	export!(Void, GuiWindow, show, |this| this.show_all() );
+	export!(Void, GuiWindow, destroy, |this| this.destroy() );
 	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
 	connect_gtk_container!(GuiWindow);
 	connect_gtk_widget!(GuiWindow);

@@ -1,4 +1,6 @@
 component LoginWindow {
+	done_flag = bool(false)
+
 	wnd = gui:Window {
 		.title = "Cool Demo"
 		.border_width = 10
@@ -39,8 +41,28 @@ component LoginWindow {
 				.sensitive = \
 					self.email_field.text.length() > 0 && \
 					self.password_field.text.length() >= 8
+
+				.clicked -> {
+					let succ = SuccessWindow:new()
+					succ.email = self.email_field.text
+					succ.wnd.show()
+
+					self.done_flag = true
+					self.wnd.destroy()
+				}
 			}
 		}
+
+		.destroy -> if self.done_flag == false { gui:quit() }
+	}
+}
+
+component SuccessWindow {
+	email = str("")
+
+	wnd = gui:Window {
+		.border_width = 10
+		gui:Label { .text = "Thanks for signing up, " + self.email + "!" }
 
 		.destroy -> gui:quit()
 	}
