@@ -1,6 +1,7 @@
 component LoginWindow {
 	wnd = gui:Window {
 		.title = "Cool Demo"
+		.border_width = 10
 
 		gui:Box(gui:Orientation:Vertical) {
 			.spacing = 10
@@ -9,17 +10,13 @@ component LoginWindow {
 			gui:Box(gui:Orientation:Horizontal) {
 				.spacing = 10
 				gui:Label { .text = "Email:" }
-				email_field = gui:Entry {
-					.placeholder_text = MaybeStr:Just("hi@example.com")
-				}
+				email_field = gui:Entry { .placeholder_text = MaybeStr:Just("hi@example.com") }
 			}
 
 			gui:Box(gui:Orientation:Horizontal) {
 				.spacing = 10
 				gui:Label { .text = "Password:" }
-				password_field = gui:Entry {
-					.visibility = false
-				}
+				password_field = gui:Entry { .visibility = false }
 			}
 
 			gui:Label {

@@ -73,6 +73,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	macro_rules! resolve_type {
 		(IntI32) => { int_() };
+		(IntU32) => { int_() };
 		(IntUsize) => { int_() };
 		(Int) => { int_() };
 		(Real) => { real_() };
@@ -86,6 +87,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiEntry) => { entry };
 		(GuiLabel) => { label };
 		(GuiWindow) => { window };
+		(GuiBoxAsContainer) => { boxt };
+		(GuiWindowAsContainer) => { window };
 		(GuiBoxAsWidget) => { boxt };
 		(GuiButtonAsWidget) => { button };
 		(GuiEntryAsWidget) => { entry };
@@ -94,6 +97,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
+		($out:ident, IntU32, $e:expr) => { let $out: u32 = $e.unchecked_int().try_into().unwrap(); };
 		($out:ident, IntUsize, $e:expr) => { let $out: usize = $e.unchecked_int().try_into().unwrap(); };
 		($out:ident, Int, $e:expr) => { let $out = $e.unchecked_int(); };
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
@@ -114,6 +118,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
+		($out:ident, GuiBoxAsContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_container(); };
+		($out:ident, GuiWindowAsContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_container(); };
 		($out:ident, GuiBoxAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
 		($out:ident, GuiButtonAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
 		($out:ident, GuiEntryAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
@@ -130,6 +136,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 	macro_rules! pack_type {
 		(IntI32, $e:expr) => { Value::Int($e.into()) };
+		(IntU32, $e:expr) => { Value::Int($e.into()) };
 		(IntUsize, $e:expr) => { Value::Int($e.try_into().unwrap()) };
 		(Int, $e:expr) => { Value::Int($e) };
 		(Real, $e:expr) => { Value::Real($e) };
@@ -293,6 +300,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 	}
 
+	macro_rules! connect_gtk_container {
+		($as_container_typ:ident) => {
+			connect_gtk_property!($as_container_typ, border_width: IntU32, get_border_width, set_border_width);
+		};
+	}
+
 	macro_rules! connect_gtk_widget {
 		($as_widget_typ:ident) => {
 			connect_gtk_property!($as_widget_typ, sensitive: Bool, get_sensitive, set_sensitive);
@@ -422,6 +435,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		}
 	)?;
 	connect_gtk_property!(GuiBox, spacing: IntI32, get_spacing, set_spacing);
+	connect_gtk_container!(GuiBoxAsContainer);
 	connect_gtk_widget!(GuiBoxAsWidget);
 
 	// ****************************************
@@ -459,6 +473,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export_notifier!(GuiWindow, destroy_notifier, _n_destroy);
 	export!(Void, GuiWindow, show, |this| this.show_all() );
 	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
+	connect_gtk_container!(GuiWindowAsContainer);
 	connect_gtk_widget!(GuiWindowAsWidget);
 
 
