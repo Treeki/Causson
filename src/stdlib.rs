@@ -34,6 +34,14 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let any_ = symtab.any_type.clone();
 	let any_ = || { any_.clone() };
 
+	let maybe_str = Type::from_body(
+		qid!(MaybeStr),
+		TypeBody::Enum(vec![
+			(id!(None), vec![]),
+			(id!(Just), vec![(str_(), id!(s))]),
+		])
+	);
+
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(qid![gui], TypeBody::Incomplete))?;
 
@@ -43,8 +51,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let orientation = Type::from_body(
 		qid!(gui:Orientation),
 		TypeBody::Enum(vec![
-			(id!("Horizontal"), vec![]),
-			(id!("Vertical"), vec![]),
+			(id!(Horizontal), vec![]),
+			(id!(Vertical), vec![]),
 		])
 	);
 
@@ -54,6 +62,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let label = Type::from_body(qid!(gui:Label), TypeBody::Primitive(PrimitiveType::GuiLabel));
 	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
 
+	symtab.add_type(maybe_str.clone())?;
 	symtab.add_type(notifier.clone())?;
 	symtab.add_type(orientation.clone())?;
 	symtab.add_type(boxt.clone())?;
@@ -69,6 +78,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Bool) => { bool_() };
 		(Str) => { str_() };
 		(Void) => { void_() };
+		(MaybeStr) => { maybe_str };
 		(Notifier) => { notifier };
 		(GuiBox) => { boxt };
 		(GuiButton) => { button };
@@ -82,6 +92,15 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
 		($out:ident, Str, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_str(); };
+		($out:ident, MaybeStr, $e:expr) => {
+			let $out = $e;
+			let ind = $out.unchecked_enum_index();
+			let $out = match ind {
+				0 => None,
+				1 => Some($out.unchecked_enum_args()[0].borrow_obj().unwrap().unchecked_str().clone()),
+				_ => unreachable!("bad MaybeStr")
+			};
+		};
 		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
 		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
 		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
@@ -103,6 +122,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Real, $e:expr) => { Value::Real($e) };
 		(Bool, $e:expr) => { Value::Bool($e) };
 		(Str, $e:expr) => { Obj::Str($e).to_heap() };
+		(MaybeStr, $e:expr) => {
+			match $e {
+				None => Value::Enum(0, vec![]),
+				Some(s) => Value::Enum(1, vec![Obj::Str(s.to_string()).to_heap()])
+			}
+		};
 		(Void, $_:tt) => { Value::Void };
 		(Notifier, $e:expr) => { $e.to_heap() };
 		(GuiBox, $e:expr) => { $e };
@@ -245,6 +270,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			export_getter!($obj_typ, $id: Str, |this| this.$get_id().unwrap().to_string());
 			export_setter!($obj_typ, |this, $id: Str| this.$set_id($id));
 		};
+		($obj_typ:ident, $id:ident: MaybeStr, $get_id:ident, $set_id:ident) => {
+			export_getter!($obj_typ, $id: MaybeStr, |this| this.$get_id().map(|x| x.to_string()));
+			export_setter!($obj_typ, |this, $id: MaybeStr| this.$set_id($id.as_deref()));
+		};
 		($obj_typ:ident, $id:ident : $prop_typ:ident, $get_id:ident, $set_id:ident) => {
 			export_getter!($obj_typ, $id: $prop_typ, |this| this.$get_id());
 			export_setter!($obj_typ, |this, $id: $prop_typ| this.$set_id($id));
@@ -300,6 +329,11 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Str, Str, from, |v: Real| v.to_string());
 	export!(Str, Str, new, |s: Str| s.to_string());
 	export!(Str, Str, default, || "".to_string());
+
+	let maybe_str_c = symtab.root.resolve_mut(&maybe_str.name).unwrap().get_children_mut().unwrap();
+	maybe_str_c.insert(id!(None), SymTabNode::new_constant(maybe_str.clone(), Value::Enum(0, vec![])));
+	export!(MaybeStr, MaybeStr, Just, |s: Str| Some(s));
+	inject_enum_type(&mut symtab, maybe_str.clone(), true)?;
 
 	export!(Void, qid!(print), || print!("\n"));
 	export!(Void, qid!(print), |i: Int| print!("{}", i));
@@ -374,8 +408,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	export_notifier!(GuiEntry, changed_notifier, _n_text);
 	connect_gtk_property!(GuiEntry, text: Str, get_text, set_text);
-	// needs Option<Str>
-	// connect_gtk_property!(GuiEntry, placeholder_text: Str, get_placeholder_text, set_placeholder_text);
+	connect_gtk_property!(GuiEntry, placeholder_text: MaybeStr, get_placeholder_text, set_placeholder_text);
 	connect_gtk_property!(GuiEntry, visibility: Bool, get_visibility, set_visibility);
 
 	// ****************************************

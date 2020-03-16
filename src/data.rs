@@ -147,6 +147,12 @@ impl Value {
 			_ => panic!("Enum value expected")
 		}
 	}
+	pub fn unchecked_enum_args(&self) -> &Vec<Value> {
+		match self {
+			Value::Enum(_, args) => args,
+			_ => panic!("Enum value expected")
+		}
+	}
 
 	pub fn borrow_obj(&self) -> Option<Ref<Obj>> {
 		match self {
