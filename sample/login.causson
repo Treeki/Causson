@@ -28,6 +28,12 @@ component LoginWindow {
 				}
 			}
 
+			save_email = gui:CheckButton { .label = "Remember my email" }
+			save_pw = gui:CheckButton {
+				.label = "Remember my password"
+				.sensitive = self.save_email.active
+			}
+
 			gui:Button {
 				.label = "Sign me in"
 				.sensitive = \

@@ -58,8 +58,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	let boxt = Type::from_body(qid!(gui:Box), TypeBody::Primitive(PrimitiveType::GuiBox));
 	let button = Type::from_body(qid!(gui:Button), TypeBody::Primitive(PrimitiveType::GuiButton));
+	let checkbutton = Type::from_body(qid!(gui:CheckButton), TypeBody::Primitive(PrimitiveType::GuiCheckButton));
 	let entry = Type::from_body(qid!(gui:Entry), TypeBody::Primitive(PrimitiveType::GuiEntry));
 	let label = Type::from_body(qid!(gui:Label), TypeBody::Primitive(PrimitiveType::GuiLabel));
+	let togglebutton = Type::from_body(qid!(gui:ToggleButton), TypeBody::Primitive(PrimitiveType::GuiToggleButton));
 	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
 
 	symtab.add_type(maybe_str.clone())?;
@@ -67,8 +69,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	symtab.add_type(orientation.clone())?;
 	symtab.add_type(boxt.clone())?;
 	symtab.add_type(button.clone())?;
+	symtab.add_type(checkbutton.clone())?;
 	symtab.add_type(entry.clone())?;
 	symtab.add_type(label.clone())?;
+	symtab.add_type(togglebutton.clone())?;
 	symtab.add_type(window.clone())?;
 
 	macro_rules! resolve_type {
@@ -84,16 +88,11 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Notifier) => { notifier };
 		(GuiBox) => { boxt };
 		(GuiButton) => { button };
+		(GuiCheckButton) => { checkbutton };
 		(GuiEntry) => { entry };
 		(GuiLabel) => { label };
+		(GuiToggleButton) => { togglebutton };
 		(GuiWindow) => { window };
-		(GuiBoxAsContainer) => { boxt };
-		(GuiWindowAsContainer) => { window };
-		(GuiBoxAsWidget) => { boxt };
-		(GuiButtonAsWidget) => { button };
-		(GuiEntryAsWidget) => { entry };
-		(GuiLabelAsWidget) => { label };
-		(GuiWindowAsWidget) => { window };
 	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
@@ -115,16 +114,11 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
 		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
 		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
+		($out:ident, GuiCheckButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_checkbutton(); };
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
+		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_togglebutton(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
-		($out:ident, GuiBoxAsContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_container(); };
-		($out:ident, GuiWindowAsContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_container(); };
-		($out:ident, GuiBoxAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
-		($out:ident, GuiButtonAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
-		($out:ident, GuiEntryAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
-		($out:ident, GuiLabelAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
-		($out:ident, GuiWindowAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
 	}
 	macro_rules! convert_arg {
 		(SymbolTable, $arg:ident) => { (void_(), id!(_DUMMY)) };
@@ -152,8 +146,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Notifier, $e:expr) => { $e.to_heap() };
 		(GuiBox, $e:expr) => { $e };
 		(GuiButton, $e:expr) => { $e };
+		(GuiCheckButton, $e:expr) => { $e };
 		(GuiEntry, $e:expr) => { $e };
 		(GuiLabel, $e:expr) => { $e };
+		(GuiToggleButton, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
 	}
 
@@ -313,6 +309,20 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 	}
 
+	macro_rules! connect_gtk_button {
+		($typ:ident) => {
+			export_notifier!($typ, clicked_notifier, _n_clicked);
+			connect_gtk_property!($typ, label: Str, get_label, set_label);
+		};
+	}
+
+	macro_rules! connect_gtk_togglebutton {
+		($typ:ident) => {
+			export_notifier!($typ, toggled_notifier, _n_active);
+			connect_gtk_property!($typ, active: Bool, get_active, set_active);
+		};
+	}
+
 	macro_rules! export_binary {
 		($ret_typ: ident, $typ:ident, $method_id:expr, |$a:ident, $b:ident| $code:expr) => {
 			export!($ret_typ, $typ, $method_id, |$a, $b : $typ| $code);
@@ -413,13 +423,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(GuiButton, GuiButton, new, |symtab: SymbolTable| {
 		let button = gtk::Button::new();
 		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
-		let val = Obj::GuiButton { button: button.clone(), clicked_notifier }.to_heap();
+		let val = Obj::GuiButton { w: button.clone(), clicked_notifier }.to_heap();
 		connect_gtk_signal!(button, connect_clicked, GuiButton, clicked_notifier, val, symtab);
 		val
 	});
-	export_notifier!(GuiButton, clicked_notifier, _n_clicked);
-	connect_gtk_property!(GuiButton, label: Str, get_label, set_label);
-	connect_gtk_widget!(GuiButtonAsWidget);
+	connect_gtk_button!(GuiButton);
+	connect_gtk_widget!(GuiButton);
 
 	// ****************************************
 	// GuiBox
@@ -431,19 +440,34 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 				1 => gtk::Orientation::Vertical,
 				_ => panic!("unknown Orientation")
 			};
-			Obj::GuiBox { box_: gtk::Box::new(orient, 0) }.to_heap()
+			Obj::GuiBox { w: gtk::Box::new(orient, 0) }.to_heap()
 		}
 	)?;
 	connect_gtk_property!(GuiBox, spacing: IntI32, get_spacing, set_spacing);
-	connect_gtk_container!(GuiBoxAsContainer);
-	connect_gtk_widget!(GuiBoxAsWidget);
+	connect_gtk_container!(GuiBox);
+	connect_gtk_widget!(GuiBox);
+
+	// ****************************************
+	// GuiCheckButton
+	export!(GuiCheckButton, GuiCheckButton, new, |symtab: SymbolTable| {
+		let btn = gtk::CheckButton::new();
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let toggled_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiCheckButton { w: btn.clone(), clicked_notifier, toggled_notifier }.to_heap();
+		connect_gtk_signal!(btn, connect_clicked, GuiCheckButton, clicked_notifier, val, symtab);
+		connect_gtk_signal!(btn, connect_toggled, GuiCheckButton, toggled_notifier, val, symtab);
+		val
+	});
+	connect_gtk_togglebutton!(GuiCheckButton);
+	connect_gtk_button!(GuiCheckButton);
+	connect_gtk_widget!(GuiCheckButton);
 
 	// ****************************************
 	// GuiEntry
 	export!(GuiEntry, GuiEntry, new, |symtab: SymbolTable| {
 		let entry = gtk::Entry::new();
 		let changed_notifier = Obj::Notifier(vec![]).to_heap();
-		let val = Obj::GuiEntry { entry: entry.clone(), changed_notifier }.to_heap();
+		let val = Obj::GuiEntry { w: entry.clone(), changed_notifier }.to_heap();
 		connect_gtk_signal!(entry, connect_changed, GuiEntry, changed_notifier, val, symtab);
 		val
 	});
@@ -451,35 +475,53 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiEntry, text: Str, get_text, set_text);
 	connect_gtk_property!(GuiEntry, placeholder_text: MaybeStr, get_placeholder_text, set_placeholder_text);
 	connect_gtk_property!(GuiEntry, visibility: Bool, get_visibility, set_visibility);
-	connect_gtk_widget!(GuiEntryAsWidget);
+	connect_gtk_widget!(GuiEntry);
 
 	// ****************************************
 	// GuiLabel
 	export!(GuiLabel, GuiLabel, new, |symtab: SymbolTable| {
-		Obj::GuiLabel { label: gtk::Label::new(None) }.to_heap()
+		Obj::GuiLabel { w: gtk::Label::new(None) }.to_heap()
 	});
 	connect_gtk_property!(GuiLabel, text: Str, get_text, set_text);
-	connect_gtk_widget!(GuiLabelAsWidget);
+	connect_gtk_widget!(GuiLabel);
+
+	// ****************************************
+	// GuiToggleButton
+	export!(GuiToggleButton, GuiToggleButton, new, |symtab: SymbolTable| {
+		let btn = gtk::ToggleButton::new();
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let toggled_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiToggleButton { w: btn.clone(), clicked_notifier, toggled_notifier }.to_heap();
+		connect_gtk_signal!(btn, connect_clicked, GuiToggleButton, clicked_notifier, val, symtab);
+		connect_gtk_signal!(btn, connect_toggled, GuiToggleButton, toggled_notifier, val, symtab);
+		val
+	});
+	connect_gtk_togglebutton!(GuiToggleButton);
+	connect_gtk_button!(GuiToggleButton);
+	connect_gtk_widget!(GuiToggleButton);
 
 	// ****************************************
 	// GuiWindow
 	export!(GuiWindow, GuiWindow, new, |symtab: SymbolTable| {
 		let window = gtk::Window::new(gtk::WindowType::Toplevel);
 		let destroy_notifier = Obj::Notifier(vec![]).to_heap();
-		let val = Obj::GuiWindow { window: window.clone(), destroy_notifier }.to_heap();
+		let val = Obj::GuiWindow { w: window.clone(), destroy_notifier }.to_heap();
 		connect_gtk_signal!(window, connect_destroy, GuiWindow, destroy_notifier, val, symtab);
 		val
 	});
 	export_notifier!(GuiWindow, destroy_notifier, _n_destroy);
 	export!(Void, GuiWindow, show, |this| this.show_all() );
 	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
-	connect_gtk_container!(GuiWindowAsContainer);
-	connect_gtk_widget!(GuiWindowAsWidget);
+	connect_gtk_container!(GuiWindow);
+	connect_gtk_widget!(GuiWindow);
 
 
 	// Repetitive container-adding methods
 	let container_parents = vec![window.clone(), boxt.clone()];
-	let container_children = vec![boxt.clone(), button.clone(), entry.clone(), label.clone()];
+	let container_children = vec![
+		boxt.clone(), button.clone(), checkbutton.clone(), entry.clone(),
+		label.clone(), togglebutton.clone()
+	];
 	for parent in &container_parents {
 		for child in &container_children {
 			symtab.add_builtin_method(
