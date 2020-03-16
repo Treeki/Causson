@@ -1,0 +1,53 @@
+component LoginWindow {
+	wnd = gui:Window {
+		.title = "Cool Demo"
+
+		gui:Box(gui:Orientation:Vertical) {
+			.spacing = 10
+			gui:Label { .text = "Welcome!" }
+
+			gui:Box(gui:Orientation:Horizontal) {
+				.spacing = 10
+				gui:Label { .text = "Email:" }
+				email_field = gui:Entry {
+					.placeholder_text = MaybeStr:Just("hi@example.com")
+				}
+			}
+
+			gui:Box(gui:Orientation:Horizontal) {
+				.spacing = 10
+				gui:Label { .text = "Password:" }
+				password_field = gui:Entry {
+					.visibility = false
+				}
+			}
+
+			gui:Label {
+				.visible = self.password_field.text.length() < 8
+				.text = if self.password_field.text.length() < 8 {
+					"Password too short!"
+				} else {
+					""
+				}
+			}
+
+			gui:Button {
+				.label = "Sign me in"
+				.sensitive = \
+					self.email_field.text.length() > 0 && \
+					self.password_field.text.length() >= 8
+			}
+		}
+
+		.destroy -> gui:quit()
+	}
+}
+
+def main() -> void {
+	gui:init()
+	let wind = LoginWindow:new()
+	wind.wnd.show()
+	gui:run()
+}
+
+

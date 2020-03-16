@@ -73,6 +73,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	macro_rules! resolve_type {
 		(IntI32) => { int_() };
+		(IntUsize) => { int_() };
 		(Int) => { int_() };
 		(Real) => { real_() };
 		(Bool) => { bool_() };
@@ -85,9 +86,15 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiEntry) => { entry };
 		(GuiLabel) => { label };
 		(GuiWindow) => { window };
+		(GuiBoxAsWidget) => { boxt };
+		(GuiButtonAsWidget) => { button };
+		(GuiEntryAsWidget) => { entry };
+		(GuiLabelAsWidget) => { label };
+		(GuiWindowAsWidget) => { window };
 	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
+		($out:ident, IntUsize, $e:expr) => { let $out: usize = $e.unchecked_int().try_into().unwrap(); };
 		($out:ident, Int, $e:expr) => { let $out = $e.unchecked_int(); };
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
@@ -107,6 +114,11 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
+		($out:ident, GuiBoxAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
+		($out:ident, GuiButtonAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
+		($out:ident, GuiEntryAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
+		($out:ident, GuiLabelAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
+		($out:ident, GuiWindowAsWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_widget(); };
 	}
 	macro_rules! convert_arg {
 		(SymbolTable, $arg:ident) => { (void_(), id!(_DUMMY)) };
@@ -118,6 +130,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 	macro_rules! pack_type {
 		(IntI32, $e:expr) => { Value::Int($e.into()) };
+		(IntUsize, $e:expr) => { Value::Int($e.try_into().unwrap()) };
 		(Int, $e:expr) => { Value::Int($e) };
 		(Real, $e:expr) => { Value::Real($e) };
 		(Bool, $e:expr) => { Value::Bool($e) };
@@ -280,6 +293,13 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 	}
 
+	macro_rules! connect_gtk_widget {
+		($as_widget_typ:ident) => {
+			connect_gtk_property!($as_widget_typ, sensitive: Bool, get_sensitive, set_sensitive);
+			connect_gtk_property!($as_widget_typ, visible: Bool, get_visible, set_visible);
+		};
+	}
+
 	macro_rules! export_binary {
 		($ret_typ: ident, $typ:ident, $method_id:expr, |$a:ident, $b:ident| $code:expr) => {
 			export!($ret_typ, $typ, $method_id, |$a, $b : $typ| $code);
@@ -288,6 +308,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	export_binary!(Bool, Bool, "op#==", |a, b| a == b);
 	export_binary!(Bool, Bool, "op#!=", |a, b| a != b);
+	export_binary!(Bool, Bool, "op#&&", |a, b| a && b);
+	export_binary!(Bool, Bool, "op#||", |a, b| a || b);
 	export!(Bool, Bool, new, |b: Bool| b);
 	export!(Bool, Bool, default, || false);
 
@@ -317,12 +339,15 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Real, Real, new, |r: Real| r);
 	export!(Real, Real, default, || 0.);
 
+	export_binary!(Bool, Str, "op#==", |a, b| a == b);
+	export_binary!(Bool, Str, "op#!=", |a, b| a != b);
 	export_binary!(Str, Str, "op#+", |a, b| {
 		let mut s = String::with_capacity(a.len() + b.len());
 		s.push_str(a);
 		s.push_str(b);
 		s
 	});
+	export!(IntUsize, Str, length, |this| this.len());
 
 	export!(Str, Str, from, |v: Bool| v.to_string());
 	export!(Str, Str, from, |v: Int| v.to_string());
@@ -381,6 +406,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	export_notifier!(GuiButton, clicked_notifier, _n_clicked);
 	connect_gtk_property!(GuiButton, label: Str, get_label, set_label);
+	connect_gtk_widget!(GuiButtonAsWidget);
 
 	// ****************************************
 	// GuiBox
@@ -396,6 +422,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		}
 	)?;
 	connect_gtk_property!(GuiBox, spacing: IntI32, get_spacing, set_spacing);
+	connect_gtk_widget!(GuiBoxAsWidget);
 
 	// ****************************************
 	// GuiEntry
@@ -410,6 +437,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiEntry, text: Str, get_text, set_text);
 	connect_gtk_property!(GuiEntry, placeholder_text: MaybeStr, get_placeholder_text, set_placeholder_text);
 	connect_gtk_property!(GuiEntry, visibility: Bool, get_visibility, set_visibility);
+	connect_gtk_widget!(GuiEntryAsWidget);
 
 	// ****************************************
 	// GuiLabel
@@ -417,6 +445,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		Obj::GuiLabel { label: gtk::Label::new(None) }.to_heap()
 	});
 	connect_gtk_property!(GuiLabel, text: Str, get_text, set_text);
+	connect_gtk_widget!(GuiLabelAsWidget);
 
 	// ****************************************
 	// GuiWindow
@@ -430,6 +459,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export_notifier!(GuiWindow, destroy_notifier, _n_destroy);
 	export!(Void, GuiWindow, show, |this| this.show_all() );
 	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
+	connect_gtk_widget!(GuiWindowAsWidget);
 
 
 	// Repetitive container-adding methods

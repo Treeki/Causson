@@ -27,6 +27,8 @@ lazy_static! {
 
 		PrecClimber::new(vec![
 			Operator::new(assign, Right),
+			Operator::new(logOr, Left),
+			Operator::new(logAnd, Left),
 			Operator::new(eq, Left) | Operator::new(ne, Left),
 			Operator::new(lt, Left) | Operator::new(le, Left) | Operator::new(gt, Left) | Operator::new(ge, Left),
 			Operator::new(add, Left) | Operator::new(subtract, Left),
@@ -382,6 +384,8 @@ mod tests {
 		assert_expr("1 >= 2", Binary(box_int(1), id!(">="), box_int(2)));
 		assert_expr("1 == 2", Binary(box_int(1), id!("=="), box_int(2)));
 		assert_expr("1 != 2", Binary(box_int(1), id!("!="), box_int(2)));
+		assert_expr("1 && 2", Binary(box_int(1), id!("&&"), box_int(2)));
+		assert_expr("1 || 2", Binary(box_int(1), id!("||"), box_int(2)));
 	}
 
 	#[test]

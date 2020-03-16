@@ -28,7 +28,7 @@ expr = {term ~ (operator ~ term)*}
     termSuffix = _{termCall | termPropAccess}
       termPropAccess = {"." ~ id}
       termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}
-  operator = _{add | subtract | multiply | divide | eq | ne | le | lt | ge | gt | assign}
+  operator = _{add | subtract | multiply | divide | eq | ne | le | lt | ge | gt | assign | logAnd | logOr}
     add = {"+"}
     subtract = {"-"}
     multiply = {"*"}
@@ -40,6 +40,8 @@ expr = {term ~ (operator ~ term)*}
     gt = {">"}
     ge = {">="}
     assign = {"="}
+    logAnd = {"&&"}
+    logOr = {"||"}
 
 codeBlock = {NEWLINE* ~ (expr ~ NEWLINE+)* ~ expr?}
 
