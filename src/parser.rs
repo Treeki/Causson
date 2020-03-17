@@ -2,6 +2,7 @@ use symbol::Symbol;
 use crate::ast::*;
 use crate::data::*;
 use crate::stdlib;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -83,8 +84,20 @@ impl ParseContext {
 				}
 
 				let mut instances = vec![];
+				let mut methods: HashMap<Symbol, &HLExpr> = HashMap::new();
 				for subdef in subdefs {
 					grab_instances(&mut instances, &subdef);
+
+					if let HLCompSubDef::Method(method_name, args, ret_type, code_expr) = subdef {
+						extra_defs.push(GlobalDef::Func(
+							qid_combine!(comp_id, *method_name),
+							FuncType::Method,
+							args.clone(),
+							ret_type.clone(),
+							code_expr.clone()
+						));
+						methods.insert(*method_name, code_expr);
+					}
 				}
 
 				// First step, create all the stuff we need
@@ -129,7 +142,13 @@ impl ParseContext {
 					total
 				}
 
-				fn scan_dependencies(expr: &HLExpr) -> Result<Vec<(HLExpr, Symbol)>> {
+				fn scan_dependencies(expr: &HLExpr, methods: &HashMap<Symbol, &HLExpr>) -> Result<Vec<(HLExpr, Symbol)>> {
+					fn _is_self(expr: &HLExpr) -> bool {
+						match expr {
+							HLExpr::ID(sym) => sym.len() == 1 && sym[0] == "self",
+							_ => false
+						}
+					}
 					fn _directly_involves_self(expr: &HLExpr) -> bool {
 						use HLExpr::*;
 						match expr {
@@ -139,40 +158,53 @@ impl ParseContext {
 						}
 					}
 
-					fn _recursive_scan(output: &mut Vec<(HLExpr, Symbol)>, expr: &HLExpr, is_call_target: bool) -> Result<()> {
+					fn _recursive_scan(output: &mut Vec<(HLExpr, Symbol)>, expr: &HLExpr, is_call_target: bool, methods: &HashMap<Symbol, &HLExpr>, method_stack: &mut Vec<Symbol>) -> Result<()> {
 						use HLExpr::*;
 						match expr {
 							ID(_) => (),
 							Binary(l, _, r) => {
-								_recursive_scan(output, &l, false)?;
-								_recursive_scan(output, &r, false)?;
+								_recursive_scan(output, &l, false, methods, method_stack)?;
+								_recursive_scan(output, &r, false, methods, method_stack)?;
 							}
 							PropAccess(subexpr, sym) => {
 								if is_call_target {
-									_recursive_scan(output, &subexpr, false)?;
+									if _is_self(&subexpr) {
+										if !method_stack.contains(sym) {
+											method_stack.push(*sym);
+											if let Some(method_expr) = methods.get(sym) {
+												_recursive_scan(output, method_expr, false, methods, method_stack)?;
+											}
+											method_stack.pop();
+										}
+									} else {
+										_recursive_scan(output, &subexpr, false, methods, method_stack)?;
+									}
 								} else {
 									if _directly_involves_self(&subexpr) {
-										output.push((*subexpr.clone(), *sym));
+										let result = (*subexpr.clone(), *sym);
+										if !output.contains(&result) {
+											output.push(result);
+										}
 									}
 								}
 							}
 							Call(target, args) => {
-								_recursive_scan(output, &target, true)?;
+								_recursive_scan(output, &target, true, methods, method_stack)?;
 								for arg in args {
-									_recursive_scan(output, &arg, false)?;
+									_recursive_scan(output, &arg, false, methods, method_stack)?;
 								}
 							}
 							If(cond, t, f) => {
-								_recursive_scan(output, &cond, false)?;
-								_recursive_scan(output, &t, false)?;
+								_recursive_scan(output, &cond, false, methods, method_stack)?;
+								_recursive_scan(output, &t, false, methods, method_stack)?;
 								if let Some(f) = f {
-									_recursive_scan(output, &f, false)?;
+									_recursive_scan(output, &f, false, methods, method_stack)?;
 								}
 							}
-							Let(_, subexpr) => _recursive_scan(output, &subexpr, false)?,
+							Let(_, subexpr) => _recursive_scan(output, &subexpr, false, methods, method_stack)?,
 							CodeBlock(subexprs) => {
 								for subexpr in subexprs {
-									_recursive_scan(output, &subexpr, false)?;
+									_recursive_scan(output, &subexpr, false, methods, method_stack)?;
 								}
 							}
 							Int(_) => (),
@@ -184,7 +216,8 @@ impl ParseContext {
 					}
 
 					let mut result = vec![];
-					_recursive_scan(&mut result, expr, false)?;
+					let mut method_stack = vec![];
+					_recursive_scan(&mut result, expr, false, methods, &mut method_stack)?;
 					Ok(result)
 				}
 
@@ -221,7 +254,7 @@ impl ParseContext {
 								prop_updates.push((method_id, this_expr, *event_id));
 							},
 							HLCompSubDef::PropertySet(prop_id, value_expr) => {
-								let deps = scan_dependencies(value_expr)?;
+								let deps = scan_dependencies(value_expr, &methods)?;
 								println!("DEPS FOR {:?}: {:?}", prop_id, deps);
 								if deps.is_empty() {
 									// Static property, assign on construction
@@ -255,6 +288,7 @@ impl ParseContext {
 									}
 								}
 							}
+							HLCompSubDef::Method(_, _, _, _) => {}
 						}
 					}
 				}

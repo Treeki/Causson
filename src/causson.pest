@@ -58,11 +58,13 @@ gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
     funcSelfArg = {"self"}
 
 gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}"}
-  compSubDef = _{compPropSet | compEventConnection | compInstance}
+  compSubDef = _{compMethod | compPropSet | compEventConnection | compInstance}
     compPropSet = {"." ~ id ~ "=" ~ expr}
     compEventConnection = {"." ~ id ~ "->" ~ (expr | ("{" ~ codeBlock ~ "}"))}
     compInstance = {(id ~ "=")? ~ qualifiedID ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
       compInstanceArgs = {"(" ~ (expr ~ ",")* ~ expr? ~ ")"}
+    compMethod = {"def" ~ compMethodSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
+      compMethodSpec = {id ~ (("(" ~ ")") | ("(" ~ (typedID ~ ",")* ~ typedID ~ ")"))}
 
 globalDef = {gTypeDef | gFuncDef | gComponentDef}
 

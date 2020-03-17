@@ -201,8 +201,24 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			let expr = parse_hlexpr(pairs.next().unwrap());
 			HLCompSubDef::PropertySet(id, expr)
 		},
+		Rule::compMethod => {
+			let mut pairs = pair.into_inner();
+			let spec = pairs.next().unwrap();
+			let ret_type = pairs.next().unwrap();
+			let code = pairs.next().unwrap();
+			let (method_name, args) = parse_comp_method_spec(spec);
+			HLCompSubDef::Method(method_name, args, parse_qualified_id(ret_type), parse_code_block(code))
+		}
 		_ => panic!("unknown component subdef type {:?}", pair)
 	}
+}
+
+fn parse_comp_method_spec(pair: Pair) -> (Symbol, Vec<FuncArg>) {
+	assert_eq!(pair.as_rule(), Rule::compMethodSpec);
+	let mut pairs = pair.into_inner();
+	let method_name = parse_id(pairs.next().unwrap());
+	let args = pairs.map(parse_typed_id).collect();
+	(method_name, args)
 }
 
 fn parse_global_def(pair: Pair) -> GlobalDef {

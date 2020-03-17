@@ -92,7 +92,8 @@ pub struct HLCompInstance {
 pub enum HLCompSubDef {
 	Instance(HLCompInstance),
 	PropertySet(Symbol, HLExpr),
-	EventConnection(Symbol, HLExpr)
+	EventConnection(Symbol, HLExpr),
+	Method(Symbol, Vec<FuncArg>, QualID, HLExpr)
 }
 
 #[derive(Debug, PartialEq)]
