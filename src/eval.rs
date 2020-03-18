@@ -4,14 +4,15 @@ use symbol::Symbol;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-pub fn call_func(symtab_rc: &Rc<RefCell<SymbolTable>>, qid: &[Symbol], args: &[Value], arg_types: &[Type], is_method: bool) -> Option<Value> {
+pub fn call_func(symtab_rc: &Rc<RefCell<SymbolTable>>, parent_qid: &[Symbol], specials: &[TypeRef], id: Symbol, args: &[Value], arg_types: &[TypeRef], is_method: bool) -> Option<Value> {
 	let expected_arg_count = arg_types.len() + if is_method { 1 } else { 0 };
 	assert!(args.len() == expected_arg_count);
 	let context = EvalContext { symtab_rc: Rc::clone(symtab_rc), locals: vec![] };
 	let symtab = symtab_rc.borrow();
-	let node = symtab.root.resolve(qid)?;
+	let node = symtab.root.resolve(parent_qid)?;
+	let node = node.resolve(&[id])?;
 	let variants = node.get_function_variants()?;
-	let func = variants.iter().find(|f| f.matches_types(arg_types) && f.is_method == is_method)?;
+	let func = variants.iter().find(|f| f.matches_types(specials, arg_types) && f.is_method == is_method)?;
 	Some(context.eval_func(func, arg_types, args.to_vec()))
 }
 
@@ -21,7 +22,7 @@ pub struct EvalContext {
 }
 
 impl EvalContext {
-	pub fn eval_func(&self, func: &Function, arg_types: &[Type], args: Vec<Value>) -> Value {
+	pub fn eval_func(&self, func: &Function, arg_types: &[TypeRef], args: Vec<Value>) -> Value {
 		match &*func.borrow() {
 			FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
 			FunctionBody::Expr(sub_expr) => {
@@ -46,13 +47,15 @@ impl EvalContext {
 				self.locals[*index] = value.clone();
 				value
 			}
-			GlobalGet(qid) => {
+			GlobalGet(_, _) => unreachable!(),
+			GlobalGetResolved(typeref, sym) => {
 				let symtab = self.symtab_rc.borrow();
-				let node = symtab.root.resolve(&qid).unwrap();
+				let node = symtab.root.resolve(&typeref.0.name).unwrap();
+				let node = node.resolve(&[*sym]).unwrap();
 				let (_, value) = node.get_constant().unwrap();
 				value
 			}
-			FunctionCall(_, _) => unreachable!(),
+			FunctionCall(_, _, _) => unreachable!(),
 			FunctionCallResolved(func, arg_types, arg_exprs) => {
 				let args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
 				self.eval_func(func, &arg_types, args)
@@ -64,10 +67,11 @@ impl EvalContext {
 				let obj = self.eval(&obj_expr);
 				let symtab_rc = Rc::clone(&self.symtab_rc);
 				let symtab = symtab_rc.borrow();
-				let type_node = symtab.root.resolve(&obj_expr.typ.name).unwrap();
+				let type_node = symtab.root.resolve(&obj_expr.typ.0.name).unwrap();
+				// TODO validate the length of the specials array
 				let method_node = type_node.resolve(&[*sym]).unwrap();
 				let variants = method_node.get_function_variants().unwrap();
-				let func = variants.iter().find(|f| f.matches_types(&arg_types)).unwrap();
+				let func = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).unwrap();
 				let mut args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
 				args.insert(0, obj);
 				self.eval_func(func, &arg_types, args)
@@ -80,12 +84,12 @@ impl EvalContext {
 						let value = self.eval(&if_true_expr);
 						self.locals.truncate(orig_local_depth);
 						let symtab = self.symtab_rc.borrow();
-						if expr.typ == symtab.void_type { Value::Void } else { value }
+						if expr.typ.0 == symtab.void_type { Value::Void } else { value }
 					} else if if_false_expr.is_some() {
 						let value = self.eval(&if_false_expr.as_ref().unwrap());
 						self.locals.truncate(orig_local_depth);
 						let symtab = self.symtab_rc.borrow();
-						if expr.typ == symtab.void_type { Value::Void } else { value }
+						if expr.typ.0 == symtab.void_type { Value::Void } else { value }
 					} else {
 						self.locals.truncate(orig_local_depth);
 						Value::Void
@@ -122,10 +126,17 @@ mod tests {
 	use ExprKind::*;
 
 	fn expr(k: ExprKind<Expr>, typ: &Type) -> Expr {
-		Expr { expr: k, typ: typ.clone() }
+		Expr { expr: k, typ: TypeRef(typ.clone(), vec![]) }
 	}
 	fn box_expr(k: ExprKind<Expr>, typ: &Type) -> Box<Expr> {
 		Box::new(expr(k, typ))
+	}
+
+	fn type_ref(typ: &Type) -> TypeRef {
+		TypeRef(typ.clone(), vec![])
+	}
+	fn spec_type(typ: &Type) -> SpecType {
+		SpecType::Type(typ.clone(), vec![])
 	}
 
 	#[test]
@@ -226,8 +237,8 @@ mod tests {
 		let test_func = Function::new_expr(
 			qid!(test),
 			false,
-			symtab.int_type.clone(),
-			vec![(symtab.bool_type.clone(), id!(arg))],
+			spec_type(&symtab.int_type),
+			vec![(spec_type(&symtab.bool_type), id!(arg))],
 			expr(If(
 				box_expr(LocalGetResolved(0), &symtab.bool_type),
 				box_expr(Int(Ok(1)), &symtab.int_type),
@@ -246,7 +257,7 @@ mod tests {
 
 		let mut ctx = EvalContext { symtab_rc: Rc::clone(&symtab_rc), locals: vec![Value::Bool(true)] };
 		let call_expr = expr(
-			FunctionCallResolved(test_func, vec![symtab.bool_type.clone()], vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
+			FunctionCallResolved(test_func, vec![type_ref(&symtab.bool_type)], vec![expr(LocalGetResolved(0), &symtab.bool_type)]),
 			&symtab.int_type
 		);
 		assert_eq!(ctx.eval(&call_expr), Value::Int(1));

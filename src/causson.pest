@@ -1,21 +1,20 @@
 WHITESPACE = _{" " | "\t" | ("\\" ~ NEWLINE)}
 COMMENT = _{"--" ~ (!NEWLINE ~ ANY)*}
 
-id = @{identifierStart ~ identifierChar*}
+id = @{identifierStart ~ identifierChar* ~ ("#" ~ (identifierChar | idAllowedOpChars)*)?}
   identifierStart = _{XID_START | "_"}
-  identifierChar = _{XID_START | XID_CONTINUE | "_" | "#" | idAllowedOpChars}
-  idAllowedOpChars = _{"+" | "-" | "*" | "/" | "<" | ">" | "=" | "!"}
+  identifierChar = _{XID_START | XID_CONTINUE | "_"}
+  idAllowedOpChars = _{"+" | "-" | "*" | "/" | "<" | ">" | "=" | "!" | "&" | "|"}
 
 qualifiedID = {(id ~ ":")* ~ id}
 
-fieldID = @{"@" ~ id}
-
-typedID = {qualifiedID ~ id}
+typeRef = {qualifiedID ~ ("<" ~ (typeRef ~ ",")* ~ typeRef ~ ">")?}
+typedID = {typeRef ~ id}
 
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
-    termPiece = _{ifTerm | letTerm | bTrue | bFalse | qualifiedID | real | int | string | ("(" ~ expr ~ ")")}
+    termPiece = _{ifTerm | letTerm | bTrue | bFalse | id | real | int | string | ("(" ~ expr ~ ")")}
       int = @{("+" | "-")? ~ ASCII_DIGIT+}
       real = @{int ~ "." ~ ASCII_DIGIT*}
       string = ${"\"" ~ stringInner ~ "\""}
@@ -25,9 +24,11 @@ expr = {term ~ (operator ~ term)*}
       bFalse = {"false"}
       ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}
       letTerm = {"let" ~ id ~ "=" ~ expr}
-    termSuffix = _{termCall | termPropAccess}
-      termPropAccess = {"." ~ id}
+    termSuffix = _{termCall | termPropAccess | termNamespaceAccess | termSpecialise}
       termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}
+      termPropAccess = {"." ~ id}
+      termNamespaceAccess = {":" ~ id}
+      termSpecialise = {"<" ~ typeRef ~ ">"}
   operator = _{add | subtract | multiply | divide | eq | ne | le | lt | ge | gt | assign | logAnd | logOr}
     add = {"+"}
     subtract = {"-"}
@@ -50,10 +51,10 @@ gTypeDef = {"type" ~ qualifiedID ~ "=" ~ typeDef}
   typeDef = _{enumDef | wrapDef | recordDef}
     enumDef = {"enum" ~ "(" ~ (enumValue ~ ",")* ~ enumValue ~ ","? ~ ")"}
       enumValue = {id ~ ("(" ~ (typedID ~ ",")* ~ (typedID ~ ","?)? ~ ")")?}
-    wrapDef = {"wrap" ~ qualifiedID}
+    wrapDef = {"wrap" ~ typeRef}
     recordDef = {"record" ~ "{" ~ NEWLINE* ~ (typedID ~ (NEWLINE | ",")+)* ~ (typedID ~ (NEWLINE | ",")?)? ~ "}"}
 
-gFuncDef = {"def" ~ funcSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
+gFuncDef = {"def" ~ funcSpec ~ "->" ~ typeRef ~ "{" ~ codeBlock ~ "}"}
   funcSpec = {qualifiedID ~ (("(" ~ funcSelfArg? ~ ")") | ("(" ~ (funcSelfArg ~ ",")? ~ (typedID ~ ",")* ~ typedID ~ ")"))}
     funcSelfArg = {"self"}
 
@@ -61,9 +62,9 @@ gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWL
   compSubDef = _{compMethod | compPropSet | compEventConnection | compInstance}
     compPropSet = {"." ~ id ~ "=" ~ expr}
     compEventConnection = {"." ~ id ~ "->" ~ (expr | ("{" ~ codeBlock ~ "}"))}
-    compInstance = {(id ~ "=")? ~ qualifiedID ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
+    compInstance = {(id ~ "=")? ~ typeRef ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
       compInstanceArgs = {"(" ~ (expr ~ ",")* ~ expr? ~ ")"}
-    compMethod = {"def" ~ compMethodSpec ~ "->" ~ qualifiedID ~ "{" ~ codeBlock ~ "}"}
+    compMethod = {"def" ~ compMethodSpec ~ "->" ~ typeRef ~ "{" ~ codeBlock ~ "}"}
       compMethodSpec = {id ~ (("(" ~ ")") | ("(" ~ (typedID ~ ",")* ~ typedID ~ ")"))}
 
 globalDef = {gTypeDef | gFuncDef | gComponentDef}

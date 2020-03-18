@@ -12,7 +12,7 @@ component LoginWindow {
 			gui:Box(gui:Orientation:Horizontal) {
 				.spacing = 10
 				gui:Label { .text = "Email:" }
-				email_field = gui:Entry { .placeholder_text = MaybeStr:Just("hi@example.com") }
+				email_field = gui:Entry { .placeholder_text = Maybe<str>:Just("hi@example.com") }
 			}
 
 			gui:Box(gui:Orientation:Horizontal) {

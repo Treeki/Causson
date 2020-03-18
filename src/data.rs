@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefMut};
 use std::ptr::NonNull;
+use crate::ast::TypeRef;
 use crate::gc::*;
 use crate::gtk::prelude::Cast;
 use symbol::Symbol;
@@ -19,7 +20,7 @@ pub enum Obj {
 	GuiLabel { w: gtk::Label },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiWindow { w: gtk::Window, destroy_notifier: Value },
-	Notifier(Vec<(Value, Vec<Symbol>)>)
+	Notifier(Vec<(Value, TypeRef, Symbol)>)
 }
 
 impl Obj {
@@ -112,14 +113,14 @@ impl Obj {
 		}
 	}
 
-	pub fn unchecked_notifier(&self) -> &Vec<(Value, Vec<Symbol>)> {
+	pub fn unchecked_notifier(&self) -> &Vec<(Value, TypeRef, Symbol)> {
 		match self {
 			Obj::Notifier(v) => v,
 			_ => panic!("Notifier heapobj expected")
 		}
 	}
 
-	pub fn unchecked_notifier_mut(&mut self) -> &mut Vec<(Value, Vec<Symbol>)> {
+	pub fn unchecked_notifier_mut(&mut self) -> &mut Vec<(Value, TypeRef, Symbol)> {
 		match self {
 			Obj::Notifier(v) => v,
 			_ => panic!("Notifier heapobj expected")

@@ -15,7 +15,7 @@ component CompWind {
 				.spacing = 10
 				gui:Label { .text = "Waffle" }
 				field = gui:Entry {
-					.placeholder_text = MaybeStr:Just("Hello")
+					.placeholder_text = Maybe<str>:Just("Hello")
 				}
 				butt1 = gui:Button { .label = self.field.text }
 				butt2 = gui:Button { .label = "Butt2" }

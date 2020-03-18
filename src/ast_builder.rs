@@ -60,6 +60,14 @@ fn parse_term(pair: Pair) -> HLExpr {
 				let id = parse_id(suffix.into_inner().next().unwrap());
 				HLExpr::PropAccess(Box::new(expr), id)
 			}
+			Rule::termNamespaceAccess => {
+				let id = parse_id(suffix.into_inner().next().unwrap());
+				HLExpr::NamespaceAccess(Box::new(expr), id)
+			}
+			Rule::termSpecialise => {
+				let refs = suffix.into_inner().map(parse_type_ref).collect();
+				HLExpr::Specialise(Box::new(expr), refs)
+			}
 			Rule::termCall => {
 				let args = suffix.into_inner().map(parse_hlexpr).collect();
 				HLExpr::Call(Box::new(expr), args)
@@ -94,7 +102,7 @@ fn parse_if_piece<'i, P>(pairs: &mut std::iter::Peekable<P>) -> HLExpr where P: 
 
 fn parse_term_piece(pair: Pair) -> HLExpr {
 	match pair.as_rule() {
-		Rule::qualifiedID => HLExpr::ID(parse_qualified_id(pair)),
+		Rule::id => HLExpr::ID(parse_id(pair)),
 		Rule::bTrue => HLExpr::Bool(true),
 		Rule::bFalse => HLExpr::Bool(false),
 		Rule::real => HLExpr::Real(pair.as_str().parse()),
@@ -123,7 +131,7 @@ fn parse_code_block(pair: Pair) -> HLExpr {
 // Global Definitions
 fn parse_type_def(pair: Pair) -> HLTypeDef {
 	match pair.as_rule() {
-		Rule::wrapDef => HLTypeDef::Wrap(parse_qualified_id(pair.into_inner().next().unwrap())),
+		Rule::wrapDef => HLTypeDef::Wrap(parse_type_ref(pair.into_inner().next().unwrap())),
 		Rule::enumDef => {
 			HLTypeDef::Enum(pair.into_inner().map(parse_enum_value).collect())
 		},
@@ -135,15 +143,15 @@ fn parse_type_def(pair: Pair) -> HLTypeDef {
 	}
 }
 
-fn parse_enum_value(pair: Pair) -> (Symbol, Vec<(QualID, Symbol)>) {
+fn parse_enum_value(pair: Pair) -> (Symbol, Vec<(HLTypeRef, Symbol)>) {
 	assert_eq!(pair.as_rule(), Rule::enumValue);
 	let mut pairs = pair.into_inner();
 	let val_id = parse_id(pairs.next().unwrap());
-	let vec: Vec<(QualID, Symbol)> = pairs.map(parse_typed_id).collect();
+	let vec: Vec<(HLTypeRef, Symbol)> = pairs.map(parse_typed_id).collect();
 	(val_id, vec)
 }
 
-fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<FuncArg>) {
+fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<HLFuncArg>) {
 	assert_eq!(pair.as_rule(), Rule::funcSpec);
 	let mut pairs = pair.into_inner();
 	let func_name = parse_qualified_id(pairs.next().unwrap());
@@ -159,12 +167,19 @@ fn parse_func_spec(pair: Pair) -> (QualID, FuncType, Vec<FuncArg>) {
 	(func_name, func_type, func_args)
 }
 
-fn parse_typed_id(pair: Pair) -> (QualID, Symbol) {
+fn parse_type_ref(pair: Pair) -> HLTypeRef {
+	assert_eq!(pair.as_rule(), Rule::typeRef);
+	let mut pairs = pair.into_inner();
+	let qid = parse_qualified_id(pairs.next().unwrap());
+	HLTypeRef(qid, vec![])
+}
+
+fn parse_typed_id(pair: Pair) -> (HLTypeRef, Symbol) {
 	assert_eq!(pair.as_rule(), Rule::typedID);
 	let mut pairs = pair.into_inner();
 	let typeref = pairs.next().unwrap();
 	let id = pairs.next().unwrap();
-	(parse_qualified_id(typeref), parse_id(id))
+	(parse_type_ref(typeref), parse_id(id))
 }
 
 fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
@@ -175,7 +190,7 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 				Rule::id => Some(parse_id(pairs.next().unwrap())),
 				_ => None
 			};
-			let what = parse_qualified_id(pairs.next().unwrap());
+			let what = parse_type_ref(pairs.next().unwrap());
 			let new_args = match pairs.peek() {
 				Some(r) if r.as_rule() == Rule::compInstanceArgs => {
 					pairs.next().unwrap().into_inner().map(parse_hlexpr).collect()
@@ -207,13 +222,13 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			let ret_type = pairs.next().unwrap();
 			let code = pairs.next().unwrap();
 			let (method_name, args) = parse_comp_method_spec(spec);
-			HLCompSubDef::Method(method_name, args, parse_qualified_id(ret_type), parse_code_block(code))
+			HLCompSubDef::Method(method_name, args, parse_type_ref(ret_type), parse_code_block(code))
 		}
 		_ => panic!("unknown component subdef type {:?}", pair)
 	}
 }
 
-fn parse_comp_method_spec(pair: Pair) -> (Symbol, Vec<FuncArg>) {
+fn parse_comp_method_spec(pair: Pair) -> (Symbol, Vec<HLFuncArg>) {
 	assert_eq!(pair.as_rule(), Rule::compMethodSpec);
 	let mut pairs = pair.into_inner();
 	let method_name = parse_id(pairs.next().unwrap());
@@ -235,7 +250,7 @@ fn parse_global_def(pair: Pair) -> GlobalDef {
 			let ret_type = pairs.next().unwrap();
 			let code = pairs.next().unwrap();
 			let (func_name, func_type, args) = parse_func_spec(spec);
-			GlobalDef::Func(func_name, func_type, args, parse_qualified_id(ret_type), parse_code_block(code))
+			GlobalDef::Func(func_name, func_type, args, parse_type_ref(ret_type), parse_code_block(code))
 		},
 		Rule::gComponentDef => {
 			let mut pairs = pair.into_inner();
@@ -271,6 +286,10 @@ mod tests {
 	use super::*;
 	use super::parse_causson_code as pcc;
 
+	fn typeref(qid: QualID) -> HLTypeRef {
+		HLTypeRef(qid, vec![])
+	}
+
 	#[test]
 	fn test_whitespace() {
 		pcc("def x() -> void { }").expect("singleline function must work");
@@ -289,11 +308,11 @@ mod tests {
 				x = 1 + 3 -- * y
 			}").unwrap();
 		assert_eq!(c, vec![
-			GlobalDef::Type(qid!(a), HLTypeDef::Wrap(qid!(a))),
+			GlobalDef::Type(qid!(a), HLTypeDef::Wrap(typeref(qid!(a)))),
 			GlobalDef::Func(
-				qid!(a), FuncType::Function, vec![], qid!(void),
+				qid!(a), FuncType::Function, vec![], typeref(qid!(void)),
 				HLExpr::Binary(
-					Box::new(HLExpr::ID(qid!(x))),
+					Box::new(HLExpr::ID(id!(x))),
 					id!("="),
 					Box::new(HLExpr::Binary(Box::new(HLExpr::Int(Ok(1))), id!("+"), Box::new(HLExpr::Int(Ok(3)))))
 				)
@@ -304,18 +323,18 @@ mod tests {
 	#[test]
 	fn test_wrap_type() {
 		let c = pcc("type x = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(qid!(x), HLTypeDef::Wrap(qid!(y)))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(x), HLTypeDef::Wrap(typeref(qid!(y))))]);
 		let c = pcc("type y = wrap a:b").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(qid!(y), HLTypeDef::Wrap(qid!(a:b)))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(y), HLTypeDef::Wrap(typeref(qid!(a:b))))]);
 		let c = pcc("type a:b = wrap y").unwrap();
-		assert_eq!(c, vec![GlobalDef::Type(qid!(a:b), HLTypeDef::Wrap(qid!(y)))]);
+		assert_eq!(c, vec![GlobalDef::Type(qid!(a:b), HLTypeDef::Wrap(typeref(qid!(y))))]);
 	}
 
 	#[test]
 	fn test_enum_type() {
 		let a_b_c_syms = vec![
 			(id!(a), vec![]),
-			(id!(b), vec![(qid!(int), id!(z))]),
+			(id!(b), vec![(typeref(qid!(int)), id!(z))]),
 			(id!(c), vec![])
 		];
 		let c = pcc("type x = enum(a,b(int z),c)").unwrap();
@@ -330,13 +349,13 @@ mod tests {
 
 	#[test]
 	fn test_record_type() {
-		fn build_rec(fields: Vec<(QualID, Symbol)>) -> HLTypeDef {
+		fn build_rec(fields: Vec<(HLTypeRef, Symbol)>) -> HLTypeDef {
 			HLTypeDef::Record { fields, rename_setters: false }
 		}
 
-		let int_a = (qid!(int), id!(a));
-		let real_b = (qid!(real), id!(b));
-		let xyz_c = (qid!(xyz), id!(c));
+		let int_a = (typeref(qid!(int)), id!(a));
+		let real_b = (typeref(qid!(real)), id!(b));
+		let xyz_c = (typeref(qid!(xyz)), id!(c));
 
 		let c = pcc("type x = record { int a, real b }").unwrap();
 		assert_eq!(c, vec![GlobalDef::Type(qid!(x), build_rec(vec![int_a.clone(), real_b.clone()]))]);
@@ -354,35 +373,39 @@ mod tests {
 	fn test_func_spec() {
 		let c = pcc("def x() -> void { }").unwrap();
 		let args = vec![];
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, args, qid!(void), HLExpr::CodeBlock(vec![]))]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, args, typeref(qid!(void)), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(real r) -> int { }").unwrap();
-		let args = vec![(qid!(real), id!(r))];
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, qid!(int), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![(typeref(qid!(real)), id!(r))];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, typeref(qid!(int)), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(real r, foo:bar fb, int i) -> foo:bar { }").unwrap();
-		let args = vec![(qid!(real), id!(r)), (qid!(foo:bar), id!(fb)), (qid!(int), id!(i))];
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, qid!(foo:bar), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![
+			(typeref(qid!(real)), id!(r)),
+			(typeref(qid!(foo:bar)), id!(fb)),
+			(typeref(qid!(int)), id!(i))
+		];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Function, args, typeref(qid!(foo:bar)), HLExpr::CodeBlock(vec![]))]);
 	}
 
 	#[test]
 	fn test_method_spec() {
 		let c = pcc("def x:y:z(self) -> void { }").unwrap();
 		let args = vec![];
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, qid!(void), HLExpr::CodeBlock(vec![]))]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, typeref(qid!(void)), HLExpr::CodeBlock(vec![]))]);
 
 		let c = pcc("def x:y:z(self, real r) -> int { }").unwrap();
-		let args = vec![(qid!(real), id!(r))];
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, qid!(int), HLExpr::CodeBlock(vec![]))]);
+		let args = vec![(typeref(qid!(real)), id!(r))];
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x:y:z), FuncType::Method, args, typeref(qid!(int)), HLExpr::CodeBlock(vec![]))]);
 	}
 
 	fn assert_expr(ecode: &str, expected: HLExpr) {
 		let ecode = String::from("def x() -> void {") + ecode + "}";
 		let c = pcc(&ecode).expect(&ecode);
-		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, vec![], qid!(void), expected)]);
+		assert_eq!(c, vec![GlobalDef::Func(qid!(x), FuncType::Function, vec![], typeref(qid!(void)), expected)]);
 	}
 
-	fn box_qid(qid: QualID) -> Box<HLExpr> { Box::new(HLExpr::ID(qid)) }
+	fn box_id(id: Symbol) -> Box<HLExpr> { Box::new(HLExpr::ID(id)) }
 	fn box_bool(v: bool) -> Box<HLExpr> { Box::new(HLExpr::Bool(v)) }
 	fn box_int(v: i64) -> Box<HLExpr> { Box::new(HLExpr::Int(Ok(v))) }
 
@@ -426,13 +449,13 @@ mod tests {
 		assert_expr(
 			"a = 5 < x + 3",
 			Binary(
-				Box::new(ID(qid!(a))),
+				Box::new(ID(id!(a))),
 				id!("="),
 				Box::new(Binary(
 					box_int(5),
 					id!("<"),
 					Box::new(Binary(
-						Box::new(ID(qid!(x))),
+						Box::new(ID(id!(x))),
 						id!("+"),
 						box_int(3)
 					))
@@ -467,7 +490,7 @@ mod tests {
 		assert_expr(
 			"if true { 1 } elif foo { 2 } else { 3 }",
 			If(box_bool(true), box_int(1), Some(
-				Box::new(If(box_qid(qid!(foo)), box_int(2), Some(box_int(3))))
+				Box::new(If(box_id(id!(foo)), box_int(2), Some(box_int(3))))
 			))
 		);
 		assert_expr(
@@ -504,13 +527,16 @@ mod tests {
 	#[test]
 	fn test_term_suffixes() {
 		use HLExpr::*;
-		assert_expr("a:b.c", PropAccess(Box::new(ID(qid!(a:b))), id!(c)));
-		assert_expr("a.b", PropAccess(box_qid(qid!(a)), id!(b)));
-		assert_expr("a()", Call(box_qid(qid!(a)), vec![]));
-		assert_expr("a(1)", Call(box_qid(qid!(a)), vec![Int(Ok(1))]));
-		assert_expr("a(1, 2)", Call(box_qid(qid!(a)), vec![Int(Ok(1)), Int(Ok(2))]));
-		assert_expr("a.b(1, 2)", Call(Box::new(PropAccess(box_qid(qid!(a)), id!(b))), vec![Int(Ok(1)), Int(Ok(2))]));
-		assert_expr("a().b", PropAccess(Box::new(Call(box_qid(qid!(a)), vec![])), id!(b)));
+
+		let a = box_id(id!(a));
+		let a_b = Box::new(NamespaceAccess(a, id!(b)));
+		assert_expr("a:b.c", PropAccess(a_b, id!(c)));
+		assert_expr("a.b", PropAccess(box_id(id!(a)), id!(b)));
+		assert_expr("a()", Call(box_id(id!(a)), vec![]));
+		assert_expr("a(1)", Call(box_id(id!(a)), vec![Int(Ok(1))]));
+		assert_expr("a(1, 2)", Call(box_id(id!(a)), vec![Int(Ok(1)), Int(Ok(2))]));
+		assert_expr("a.b(1, 2)", Call(Box::new(PropAccess(box_id(id!(a)), id!(b))), vec![Int(Ok(1)), Int(Ok(2))]));
+		assert_expr("a().b", PropAccess(Box::new(Call(box_id(id!(a)), vec![])), id!(b)));
 	}
 
 	#[test]
@@ -522,7 +548,7 @@ mod tests {
 		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: Some(id!(x)),
-				what: qid!(Gui:Window),
+				what: typeref(qid!(Gui:Window)),
 				new_args: vec![],
 				children: vec![]
 			})
@@ -532,18 +558,18 @@ mod tests {
 		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: None,
-				what: qid!(Gui:Window),
+				what: typeref(qid!(Gui:Window)),
 				new_args: vec![HLExpr::Int(Ok(5))],
 				children: vec![
 					HLCompSubDef::Instance(HLCompInstance {
 						name: Some(id!("y")),
-						what: qid!(Gui:Button),
+						what: typeref(qid!(Gui:Button)),
 						new_args: vec![],
 						children: vec![]
 					}),
 					HLCompSubDef::Instance(HLCompInstance {
 						name: None,
-						what: qid!(Gui:Dummy),
+						what: typeref(qid!(Gui:Dummy)),
 						new_args: vec![],
 						children: vec![]
 					})
@@ -555,7 +581,7 @@ mod tests {
 		assert_eq!(c, vec![GlobalDef::Component(qid!(xyz), vec![
 			HLCompSubDef::Instance(HLCompInstance {
 				name: Some(id!(x)),
-				what: qid!(Gui:Window),
+				what: typeref(qid!(Gui:Window)),
 				new_args: vec![],
 				children: vec![
 					HLCompSubDef::PropertySet(id!(title), HLExpr::Str("beep".to_string())),

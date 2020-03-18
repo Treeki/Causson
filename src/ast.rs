@@ -51,7 +51,9 @@ lazy_static! {
 // This maps closely to the Causson source code
 #[derive(Debug, Clone, PartialEq)]
 pub enum HLExpr {
-	ID(QualID),
+	ID(Symbol),
+	Specialise(Box<HLExpr>, Vec<HLTypeRef>),
+	NamespaceAccess(Box<HLExpr>, Symbol),
 	Binary(Box<HLExpr>, Symbol, Box<HLExpr>),
 	PropAccess(Box<HLExpr>, Symbol),
 	Call(Box<HLExpr>, Vec<HLExpr>),
@@ -64,15 +66,33 @@ pub enum HLExpr {
 	Str(String)
 } 
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct HLTypeRef(pub QualID, pub Vec<HLTypeRef>);
+
+impl HLTypeRef {
+	pub fn to_hl_expr(&self) -> HLExpr {
+		let qid: &QualID = &self.0;
+		let mut e = HLExpr::ID(qid[0]);
+		for sym in &qid[1..] {
+			e = HLExpr::NamespaceAccess(Box::new(e), *sym);
+		}
+
+		match self.1.is_empty() {
+			true  => e,
+			false => HLExpr::Specialise(Box::new(e), self.1.clone())
+		}
+	}
+}
+
 // A definition for a new type
 #[derive(Debug, PartialEq)]
 pub enum HLTypeDef {
-	Enum(Vec<(Symbol, Vec<(QualID, Symbol)>)>),
-	Wrap(QualID),
-	Record { fields: Vec<(QualID, Symbol)>, rename_setters: bool }
+	Enum(Vec<(Symbol, Vec<(HLTypeRef, Symbol)>)>),
+	Wrap(HLTypeRef),
+	Record { fields: Vec<(HLTypeRef, Symbol)>, rename_setters: bool }
 }
 
-pub type FuncArg = (QualID, Symbol);
+pub type HLFuncArg = (HLTypeRef, Symbol);
 
 #[derive(Debug, PartialEq)]
 pub enum FuncType {
@@ -83,7 +103,7 @@ pub enum FuncType {
 #[derive(Debug, PartialEq)]
 pub struct HLCompInstance {
 	pub name: Option<Symbol>,
-	pub what: QualID,
+	pub what: HLTypeRef,
 	pub new_args: Vec<HLExpr>,
 	pub children: Vec<HLCompSubDef>
 }
@@ -93,13 +113,13 @@ pub enum HLCompSubDef {
 	Instance(HLCompInstance),
 	PropertySet(Symbol, HLExpr),
 	EventConnection(Symbol, HLExpr),
-	Method(Symbol, Vec<FuncArg>, QualID, HLExpr)
+	Method(Symbol, Vec<HLFuncArg>, HLTypeRef, HLExpr)
 }
 
 #[derive(Debug, PartialEq)]
 pub enum GlobalDef {
 	Type(QualID, HLTypeDef),
-	Func(QualID, FuncType, Vec<FuncArg>, QualID, HLExpr),
+	Func(QualID, FuncType, Vec<HLFuncArg>, HLTypeRef, HLExpr),
 	Component(QualID, Vec<HLCompSubDef>)
 }
 
@@ -158,10 +178,10 @@ impl Type {
 #[derive(Debug)]
 pub enum TypeBody {
 	Incomplete,
-	Enum(Vec<(Symbol, Vec<(Type, Symbol)>)>),
+	Enum(Vec<(Symbol, Vec<(SpecType, Symbol)>)>),
 	Primitive(PrimitiveType),
-	Wrapper(Type),
-	Record(Vec<(Type, Symbol)>)
+	Wrapper(TypeRef),
+	Record(Vec<(TypeRef, Symbol)>)
 }
 #[derive(Debug)]
 pub struct TypeData {
@@ -169,7 +189,7 @@ pub struct TypeData {
 	body: RefCell<TypeBody>
 }
 impl TypeBody {
-	pub fn unchecked_record_fields(&self) -> &Vec<(Type, Symbol)> {
+	pub fn unchecked_record_fields(&self) -> &Vec<(TypeRef, Symbol)> {
 		match self {
 			TypeBody::Record(fields) => fields,
 			_ => panic!("Record TypeBody expected")
@@ -184,7 +204,7 @@ pub struct Function(Rc<FunctionData>);
 
 pub enum FunctionBody {
 	Incomplete(usize),
-	BuiltIn(Box<dyn Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value>),
+	BuiltIn(Box<dyn Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value>),
 	Expr(Expr)
 }
 impl fmt::Debug for FunctionBody {
@@ -201,8 +221,8 @@ impl fmt::Debug for FunctionBody {
 pub struct FunctionData {
 	pub name: QualID,
 	pub is_method: bool,
-	pub arguments: Vec<(Type, Symbol)>,
-	pub return_type: Type,
+	pub arguments: Vec<(SpecType, Symbol)>,
+	pub return_type: SpecType,
 	body: RefCell<FunctionBody>
 }
 
@@ -215,8 +235,8 @@ impl Function {
 	pub fn borrow(&self) -> Ref<FunctionBody> { self.0.body.borrow() }
 	pub fn borrow_mut(&mut self) -> RefMut<FunctionBody> { self.0.body.borrow_mut() }
 
-	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, func: F) -> Function
-		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
+	pub fn new_builtin<F>(name: QualID, is_method: bool, return_type: SpecType, arguments: Vec<(SpecType, Symbol)>, func: F) -> Function
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
 	{
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
@@ -224,26 +244,29 @@ impl Function {
 		}))
 	}
 
-	pub fn new_incomplete(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, id: usize) -> Function {
+	pub fn new_incomplete(name: QualID, is_method: bool, return_type: SpecType, arguments: Vec<(SpecType, Symbol)>, id: usize) -> Function {
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
 			body: RefCell::new(FunctionBody::Incomplete(id))
 		}))
 	}
 
-	pub fn new_expr(name: QualID, is_method: bool, return_type: Type, arguments: Vec<(Type, Symbol)>, expr: Expr) -> Function {
+	#[allow(dead_code)]
+	pub fn new_expr(name: QualID, is_method: bool, return_type: SpecType, arguments: Vec<(SpecType, Symbol)>, expr: Expr) -> Function {
 		Function(Rc::new(FunctionData {
 			name, is_method, arguments, return_type,
 			body: RefCell::new(FunctionBody::Expr(expr))
 		}))
 	}
 
-	pub fn matches_types(&self, types: &[Type]) -> bool {
+	pub fn matches_types(&self, specials: &[TypeRef], types: &[TypeRef]) -> bool {
 		(self.0.arguments.len() == types.len()) &&
-		types.iter().zip(self.0.arguments.iter()).all(|(check, (arg, _))| check == arg)
+		types.iter().zip(self.0.arguments.iter()).all(
+			|(check, (arg, _))| arg.matches(check, specials)
+		)
 	}
 
-	pub fn matches_arguments(&self, args: &[(Type, Symbol)]) -> bool {
+	pub fn matches_arg_types(&self, args: &[(SpecType, Symbol)]) -> bool {
 		(self.0.arguments.len() == args.len()) &&
 		args.iter().zip(self.0.arguments.iter()).all(|((check, _), (arg, _))| check == arg)
 	}
@@ -269,11 +292,12 @@ pub enum ExprKind<P: Clone> {
 	LocalSet(Symbol, Box<P>),
 	LocalGetResolved(usize),
 	LocalSetResolved(usize, Box<P>),
-	GlobalGet(QualID),
-	FunctionCall(QualID, Vec<P>),
-	FunctionCallResolved(Function, Vec<Type>, Vec<P>),
+	GlobalGet(HLTypeRef, Symbol),
+	GlobalGetResolved(TypeRef, Symbol),
+	FunctionCall(HLTypeRef, Symbol, Vec<P>),
+	FunctionCallResolved(Function, Vec<TypeRef>, Vec<P>),
 	MethodCall(Box<P>, Symbol, Vec<P>),
-	MethodCallResolved(Box<P>, Symbol, Vec<Type>, Vec<P>),
+	MethodCallResolved(Box<P>, Symbol, Vec<TypeRef>, Vec<P>),
 	If(Box<P>, Box<P>, Option<Box<P>>),
 	Let(Symbol, Box<P>),
 	CodeBlock(Vec<P>),
@@ -289,7 +313,44 @@ pub struct UncheckedExpr(pub ExprKind<UncheckedExpr>);
 #[derive(Debug, Clone)]
 pub struct Expr {
 	pub expr: ExprKind<Expr>,
-	pub typ: Type
+	pub typ: TypeRef
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeRef(pub Type, pub Vec<TypeRef>);
+
+impl TypeRef {
+	pub fn to_spectype(&self) -> SpecType {
+		SpecType::Type(self.0.clone(), self.1.iter().map(TypeRef::to_spectype).collect::<Vec<SpecType>>())
+	}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpecType {
+	Type(Type, Vec<SpecType>),
+	Placeholder(usize)
+}
+
+impl SpecType {
+	pub fn fill_gap(&self, specials: &[TypeRef]) -> TypeRef {
+		match self {
+			SpecType::Type(t, params) => {
+				let params = params.iter().map(|p| p.fill_gap(specials)).collect::<Vec<TypeRef>>();
+				TypeRef(t.clone(), params)
+			}
+			SpecType::Placeholder(i) => specials[*i].clone()
+		}
+	}
+
+	pub fn matches(&self, typ: &TypeRef, specials: &[TypeRef]) -> bool {
+		match self {
+			SpecType::Type(t, params) => {
+				(t == &typ.0) && (params.len() == typ.1.len()) &&
+				params.iter().zip(&typ.1).all(|(spec, field)| spec.matches(field, specials))
+			}
+			SpecType::Placeholder(i) => &specials[*i] == typ
+		}
+	}
 }
 
 
@@ -299,7 +360,7 @@ pub enum SymTabNode {
 	Namespace { children: HashMap<Symbol, SymTabNode> },
 	Type { typ: Type, children: HashMap<Symbol, SymTabNode> },
 	Function { variants: Vec<Function> },
-	Constant { typ: Type, value: Value }
+	Constant { typ: SpecType, value: Value }
 }
 
 impl SymTabNode {
@@ -312,7 +373,7 @@ impl SymTabNode {
 	pub fn new_function() -> SymTabNode {
 		SymTabNode::Function { variants: vec![] }
 	}
-	pub fn new_constant(typ: Type, value: Value) -> SymTabNode {
+	pub fn new_constant(typ: SpecType, value: Value) -> SymTabNode {
 		SymTabNode::Constant { typ, value }
 	}
 
@@ -339,7 +400,7 @@ impl SymTabNode {
 		}
 	}
 
-	pub fn get_constant(&self) -> Option<(Type, Value)> {
+	pub fn get_constant(&self) -> Option<(SpecType, Value)> {
 		match self {
 			SymTabNode::Constant { typ, value, .. } => Some((typ.clone(), value.clone())),
 			_ => None
@@ -442,20 +503,38 @@ impl SymbolTable {
 	}
 
 	pub fn add_builtin_function<F>(&mut self, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
 	{
 		self.add_builtin_fn(false, qid, return_type, args, func)
 	}
 	pub fn add_builtin_method<F>(&mut self, has_self: bool, typ: &Type, name: Symbol, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
 	{
 		self.add_builtin_fn(has_self, qid_combine!(&typ.name, name), return_type, args, func)
 	}
 	fn add_builtin_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &Type, args: &[(Type, Symbol)], func: F) -> Result<(), SymTabError>
-		where F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
 	{
 		let dummy: Symbol = *DUMMY_ARG; // rustc is bad sometimes
-		let cleaned_args: Vec<(Type, Symbol)> = args.iter().cloned().filter(|(_, s)| dummy != *s).collect();
+		let cleaned_args: Vec<(SpecType, Symbol)> = args.iter().cloned().filter(|(_, s)| dummy != *s).map(|(t, s)| (SpecType::Type(t, vec![]), s)).collect();
+		self.add_function(Function::new_builtin(qid, is_method, SpecType::Type(return_type.clone(), vec![]), cleaned_args, func))
+	}
+
+	pub fn add_builtin_generic_function<F>(&mut self, qid: QualID, return_type: &SpecType, args: &[(SpecType, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
+	{
+		self.add_builtin_generic_fn(false, qid, return_type, args, func)
+	}
+	pub fn add_builtin_generic_method<F>(&mut self, has_self: bool, typ: &Type, name: Symbol, return_type: &SpecType, args: &[(SpecType, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
+	{
+		self.add_builtin_generic_fn(has_self, qid_combine!(&typ.name, name), return_type, args, func)
+	}
+	fn add_builtin_generic_fn<F>(&mut self, is_method: bool, qid: QualID, return_type: &SpecType, args: &[(SpecType, Symbol)], func: F) -> Result<(), SymTabError>
+		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
+	{
+		let dummy: Symbol = *DUMMY_ARG; // rustc is bad sometimes
+		let cleaned_args: Vec<(SpecType, Symbol)> = args.iter().cloned().filter(|(_, s)| dummy != *s).collect();
 		self.add_function(Function::new_builtin(qid, is_method, return_type.clone(), cleaned_args, func))
 	}
 
@@ -467,7 +546,7 @@ impl SymbolTable {
 		if let Some(existing) = hashmap.get_mut(&name) {
 			// add to the existing function?
 			let group = existing.get_function_variants().ok_or(SymTabError::DuplicateName)?;
-			if group.iter().any(|c| c.matches_arguments(&func.arguments)) {
+			if group.iter().any(|c| c.matches_arg_types(&func.arguments)) {
 				Err(SymTabError::DuplicateOverload)
 			} else {
 				existing.get_function_variants_mut().unwrap().push(func_copy);

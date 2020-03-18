@@ -15,6 +15,7 @@ pub enum ParserError {
 	SymTab(SymTabError),
 	TypeIsMissing,
 	TypeIsIncomplete,
+	TypeExpected,
 	TypeDependencyCycle,
 	FunctionIsMissing,
 	NoMatchingOverload,
@@ -25,7 +26,8 @@ pub enum ParserError {
 	BadIfConditionType,
 	VariableNotFound,
 	ConstantNotFound,
-	MissingNamespace
+	MissingNamespace,
+	UnexpectedSpecialisation,
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
 
@@ -41,23 +43,26 @@ impl Type {
 			Ok(())
 		}
 	}
+}
 
-	fn err_if_equal(a: &Type, b: &Type, err: ParserError) -> Result<()> {
+impl TypeRef {
+	fn err_if_equal(a: &TypeRef, b: &TypeRef, err: ParserError) -> Result<()> {
 		if a == b {
 			Err(err)
 		} else {
 			Ok(())
 		}
 	}
-	fn err_if_not_equal(a: &Type, b: &Type, err: ParserError) -> Result<()> {
+	fn err_if_not_equal(a: &TypeRef, b: &TypeRef, err: ParserError) -> Result<()> {
 		if a == b {
 			Ok(())
 		} else {
 			Err(err)
 		}
 	}
-	fn ensure_equal(a: &Type, b: &Type) -> Result<()> {
-		Type::err_if_not_equal(a, b, ParserError::TypeMismatch)
+
+	fn ensure_equal(a: &TypeRef, b: &TypeRef) -> Result<()> {
+		TypeRef::err_if_not_equal(&a, &b, ParserError::TypeMismatch)
 	}
 }
 
@@ -118,14 +123,17 @@ impl ParseContext {
 
 					// Add a new field to the record
 					record_fields.push((instance.what.clone(), instance_id));
-					record_fields.push((qid!(Notifier), notifier_id));
+					record_fields.push((HLTypeRef(qid!(Notifier), vec![]), notifier_id));
 
 					// Initialise these in our 'new' function
-					let instance_new_expr = HLExpr::ID(qid_combine!(&instance.what, id!(new)));
+					// let instance_new_expr = HLExpr::ID(qid_combine!(&instance.what, id!(new)));
+					let instance_type_expr = instance.what.to_hl_expr();
+					let instance_new_expr = HLExpr::NamespaceAccess(Box::new(instance_type_expr), id!(new));
 					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), instance.new_args.clone());
 					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
 
-					let notifier_new_expr = HLExpr::ID(qid!(Notifier:new));
+					let notifier_type_expr = HLExpr::ID(id!(Notifier));
+					let notifier_new_expr = HLExpr::NamespaceAccess(Box::new(notifier_type_expr), id!(new));
 					let notifier_expr = HLExpr::Call(Box::new(notifier_new_expr), vec![]);
 					new_frag.push(HLExpr::Let(notifier_id, Box::new(notifier_expr)));
 				}
@@ -145,14 +153,14 @@ impl ParseContext {
 				fn scan_dependencies(expr: &HLExpr, methods: &HashMap<Symbol, &HLExpr>) -> Result<Vec<(HLExpr, Symbol)>> {
 					fn _is_self(expr: &HLExpr) -> bool {
 						match expr {
-							HLExpr::ID(sym) => sym.len() == 1 && sym[0] == "self",
+							HLExpr::ID(sym) => *sym == "self",
 							_ => false
 						}
 					}
 					fn _directly_involves_self(expr: &HLExpr) -> bool {
 						use HLExpr::*;
 						match expr {
-							ID(sym) => sym.len() == 1 && sym[0] == "self",
+							ID(sym) => *sym == "self",
 							PropAccess(subexpr, _) => _directly_involves_self(&subexpr),
 							_ => false
 						}
@@ -162,6 +170,8 @@ impl ParseContext {
 						use HLExpr::*;
 						match expr {
 							ID(_) => (),
+							Specialise(_, _) => (),
+							NamespaceAccess(_, _) => (),
 							Binary(l, _, r) => {
 								_recursive_scan(output, &l, false, methods, method_stack)?;
 								_recursive_scan(output, &r, false, methods, method_stack)?;
@@ -228,8 +238,8 @@ impl ParseContext {
 					for subdef in &instance.children {
 						match subdef {
 							HLCompSubDef::Instance(_sub_instance) => {
-								let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
-								let child_expr = HLExpr::ID(vec![instance_ids[sub_index]]);
+								let parent_expr = HLExpr::ID(instance_ids[index]);
+								let child_expr = HLExpr::ID(instance_ids[sub_index]);
 								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), id!(add_child));
 								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
 								sub_index += get_instance_weight(_sub_instance);
@@ -245,12 +255,12 @@ impl ParseContext {
 									method_qid,
 									FuncType::Method,
 									vec![],
-									qid!(void),
+									HLTypeRef(qid!(void), vec![]),
 									value_expr.clone()
 								));
 
 								// Rely on the existing Notifier logic
-								let this_expr = HLExpr::ID(vec![instance_ids[index]]);
+								let this_expr = HLExpr::ID(instance_ids[index]);
 								prop_updates.push((method_id, this_expr, *event_id));
 							},
 							HLCompSubDef::PropertySet(prop_id, value_expr) => {
@@ -258,7 +268,7 @@ impl ParseContext {
 								println!("DEPS FOR {:?}: {:?}", prop_id, deps);
 								if deps.is_empty() {
 									// Static property, assign on construction
-									let parent_expr = HLExpr::ID(vec![instance_ids[index]]);
+									let parent_expr = HLExpr::ID(instance_ids[index]);
 									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
 									let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
 									new_frag.push(set_expr);
@@ -267,7 +277,7 @@ impl ParseContext {
 									let updater_id = id!(format!("_upd_{}", next_callback_id));
 									next_callback_id += 1;
 
-									let self_expr = HLExpr::ID(qid!(self));
+									let self_expr = HLExpr::ID(id!(self));
 									let parent_expr = HLExpr::PropAccess(Box::new(self_expr), instance_ids[index]);
 									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
 									let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
@@ -278,7 +288,7 @@ impl ParseContext {
 										updater_qid,
 										FuncType::Method,
 										vec![],
-										qid!(void),
+										HLTypeRef(qid!(void), vec![]),
 										set_expr
 									));
 
@@ -296,13 +306,14 @@ impl ParseContext {
 				let result_id = id!(self);
 
 				// self = Type:build(...)
-				let build_qid = qid_combine!(comp_id, id!(build));
-				let field_id_exprs = record_fields.iter().map(|(_, i)| HLExpr::ID(vec![*i])).collect();
-				new_frag.push(HLExpr::Let(result_id, Box::new(HLExpr::Call(Box::new(HLExpr::ID(build_qid)), field_id_exprs))));
+				let comp_type_expr = HLTypeRef(comp_id.clone(), vec![]).to_hl_expr();
+				let comp_build_expr = HLExpr::NamespaceAccess(Box::new(comp_type_expr), id!(build));
+				let field_id_exprs = record_fields.iter().map(|(_, i)| HLExpr::ID(*i)).collect();
+				new_frag.push(HLExpr::Let(result_id, Box::new(HLExpr::Call(Box::new(comp_build_expr), field_id_exprs))));
 
 				// Update all dynamic properties
 				for upd in prop_update_methods {
-					let self_expr = HLExpr::ID(vec![result_id]);
+					let self_expr = HLExpr::ID(result_id);
 					let upd_expr = HLExpr::PropAccess(Box::new(self_expr), upd);
 					new_frag.push(HLExpr::Call(Box::new(upd_expr), vec![]));
 				}
@@ -313,13 +324,13 @@ impl ParseContext {
 					let notifier_id = id!(format!("_n_{}", dep_prop));
 					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_id);
 					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), id!(connect));
-					let self_expr = HLExpr::ID(vec![result_id]);
+					let self_expr = HLExpr::ID(result_id);
 					let upd_expr = HLExpr::Str(upd.to_string());
 					new_frag.push(HLExpr::Call(Box::new(connect_expr), vec![self_expr, upd_expr]));
 				}
 
 				// Finally, return self
-				new_frag.push(HLExpr::ID(vec![result_id]));
+				new_frag.push(HLExpr::ID(result_id));
 
 				extra_defs.push(GlobalDef::Type(
 					comp_id.clone(),
@@ -329,7 +340,7 @@ impl ParseContext {
 					qid_combine!(comp_id, id!(new)),
 					FuncType::Function,
 					vec![],
-					comp_id.clone(),
+					HLTypeRef(comp_id.clone(), vec![]),
 					HLExpr::CodeBlock(new_frag)
 				));
 
@@ -338,14 +349,14 @@ impl ParseContext {
 					let mut code = vec![];
 
 					// Write it using the renamed default setter
-					let self_expr = HLExpr::ID(qid!(self));
+					let self_expr = HLExpr::ID(id!(self));
 					let defsetter_id = id!(format!("_set_{}", instance_id));
 					let defsetter_expr = HLExpr::PropAccess(Box::new(self_expr), defsetter_id);
-					let v_expr = HLExpr::ID(qid!(v));
+					let v_expr = HLExpr::ID(id!(v));
 					code.push(HLExpr::Call(Box::new(defsetter_expr), vec![v_expr]));
 
 					// Call the notifier
-					let self_expr = HLExpr::ID(qid!(self));
+					let self_expr = HLExpr::ID(id!(self));
 					let notifier_expr = HLExpr::PropAccess(Box::new(self_expr), notifier_id);
 					let notify_expr = HLExpr::PropAccess(Box::new(notifier_expr), id!(notify));
 					code.push(HLExpr::Call(Box::new(notify_expr), vec![]));
@@ -356,7 +367,7 @@ impl ParseContext {
 						setter_qid,
 						FuncType::Method,
 						vec![(instance.what.clone(), id!(v))],
-						qid!(void),
+						HLTypeRef(qid!(void), vec![]),
 						HLExpr::CodeBlock(code)
 					));
 				}
@@ -366,6 +377,14 @@ impl ParseContext {
 		Ok(extra_defs)
 	}
 
+	fn resolve_typeref(symtab: &mut SymbolTable, r: &HLTypeRef) -> Result<TypeRef> {
+		let typ = symtab.root.resolve(&r.0).ok_or(ParserError::TypeIsMissing)?;
+		let typ = typ.get_type().ok_or(ParserError::TypeIsMissing)?;
+		typ.ensure_complete()?;
+		let refs = r.1.iter().map(|sr| ParseContext::resolve_typeref(symtab, &sr)).collect::<Result<Vec<TypeRef>>>()?;
+		Ok(TypeRef(typ, refs))
+	}
+
 	fn replace_incomplete_type(&mut self, name: &[Symbol], typedef: &HLTypeDef) -> Result<()> {
 		let mut symtab = self.symtab_rc.borrow_mut();
 		let node = symtab.root.resolve_mut(name).expect("incomplete type should exist!");
@@ -373,12 +392,10 @@ impl ParseContext {
 
 		match typedef {
 			HLTypeDef::Wrap(target_ref) => {
-				let target_type = symtab.root.resolve(target_ref).ok_or(ParserError::TypeIsMissing)?;
-				let target_type = target_type.get_type().ok_or(ParserError::TypeIsMissing)?;
-				target_type.ensure_complete()?;
-				*typ.borrow_mut() = TypeBody::Wrapper(target_type.clone());
+				let target_typeref = ParseContext::resolve_typeref(&mut symtab, target_ref)?;
+				*typ.borrow_mut() = TypeBody::Wrapper(target_typeref.clone());
 
-				stdlib::inject_wrap_type(&mut symtab, typ, target_type)?;
+				stdlib::inject_wrap_type(&mut symtab, typ, target_typeref.0)?;
 				Ok(())
 			}
 			HLTypeDef::Enum(values) => {
@@ -386,12 +403,8 @@ impl ParseContext {
 				for (val_id, fields) in values {
 					let fields = fields.iter().map(
 						|(tref, field_id)|
-						symtab.root
-							.resolve(tref)
-							.and_then(SymTabNode::get_type)
-							.ok_or(ParserError::TypeIsMissing)
-							.map(|t| (t, field_id.clone()))
-					).collect::<Result<Vec<(Type, Symbol)>>>()?;
+						ParseContext::resolve_typeref(&mut symtab, &tref).map(|t| (t.to_spectype(), *field_id))
+					).collect::<Result<Vec<(SpecType, Symbol)>>>()?;
 					res_values.push((val_id.clone(), fields));
 				}
 
@@ -400,10 +413,10 @@ impl ParseContext {
 						// we have to re-select 'node' because the borrow checker is silly
 						let node = symtab.root.resolve_mut(name).unwrap();
 						let c = Value::Enum(i, vec![]);
-						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(typ.clone(), c));
+						node.get_children_mut().unwrap().insert(*val_id, SymTabNode::new_constant(SpecType::Type(typ.clone(), vec![]), c));
 					} else {
-						symtab.add_builtin_method(
-							false, &typ, *val_id, &typ, &fields,
+						symtab.add_builtin_generic_method(
+							false, &typ, *val_id, &SpecType::Type(typ.clone(), vec![]), &fields,
 							move |_, _, args| { Value::Enum(i, args.to_vec()) }
 						)?;
 					}
@@ -416,12 +429,8 @@ impl ParseContext {
 			HLTypeDef::Record { fields, rename_setters } => {
 				let fields = fields.iter().map(
 					|(tref, field_id)|
-					symtab.root
-						.resolve(tref)
-						.and_then(SymTabNode::get_type)
-						.ok_or(ParserError::TypeIsMissing)
-						.map(|t| (t, field_id.clone()))
-				).collect::<Result<Vec<(Type, Symbol)>>>()?;
+					ParseContext::resolve_typeref(&mut symtab, &tref).map(|t| (t, *field_id))
+				).collect::<Result<Vec<(TypeRef, Symbol)>>>()?;
 				stdlib::inject_record_type(&mut symtab, typ.clone(), &fields, *rename_setters)?;
 				*typ.borrow_mut() = TypeBody::Record(fields);
 				Ok(())
@@ -482,17 +491,10 @@ impl ParseContext {
 			if let GlobalDef::Func(name, func_type, args, return_type, _) = def {
 				let args = args.iter().map(
 					|(tref, arg_id)|
-					symtab.root
-						.resolve(tref)
-						.and_then(SymTabNode::get_type)
-						.ok_or(ParserError::TypeIsMissing)
-						.map(|t| (t, arg_id.clone()))
-				).collect::<Result<Vec<(Type, Symbol)>>>()?;
+					ParseContext::resolve_typeref(&mut symtab, &tref).map(|t| (t.to_spectype(), *arg_id))
+				).collect::<Result<Vec<(SpecType, Symbol)>>>()?;
 
-				let return_type = symtab.root
-					.resolve(return_type)
-					.and_then(SymTabNode::get_type)
-					.ok_or(ParserError::TypeIsMissing)?;
+				let return_type = ParseContext::resolve_typeref(&mut symtab, &return_type)?.to_spectype();
 
 				let is_method = match func_type {
 					FuncType::Function => false,
@@ -533,31 +535,62 @@ impl ParseContext {
 		let result_expr = ctx.typecheck_expr(expr)?;
 
 		// any final result is ok if the function returns void
-		if func.return_type != self.symtab_rc.borrow().void_type {
-			Type::ensure_equal(&result_expr.typ, &func.return_type)?;
+		match &func.return_type {
+			SpecType::Placeholder(_) => unreachable!("cannot define custom generic functions (yet?)"),
+			SpecType::Type(t, _params) => {
+				if t != &self.symtab_rc.borrow().void_type {
+					// calling fill_gap here is ugly, but works for now
+					TypeRef::ensure_equal(&result_expr.typ, &func.return_type.fill_gap(&[]))?;
+				}
+			}
 		}
 		Ok(result_expr)
 	}
 }
 
+fn desugar_qual_id(expr: &HLExpr, failure: ParserError) -> Result<QualID> {
+	let mut qid = vec![];
+	let mut expr = expr;
+
+	loop {
+		expr = match expr {
+			HLExpr::ID(id) => {
+				qid.push(*id);
+				qid.reverse();
+				return Ok(qid)
+			}
+			HLExpr::NamespaceAccess(subexpr, id) => {
+				qid.push(*id);
+				&*subexpr
+			}
+			_ => return Err(failure)
+		};
+	}
+}
+
+fn desugar_type_ref(expr: &HLExpr) -> Result<HLTypeRef> {
+	match expr {
+		HLExpr::ID(_) | HLExpr::NamespaceAccess(_, _) => {
+			Ok(HLTypeRef(desugar_qual_id(expr, ParserError::TypeExpected)?, vec![]))
+		}
+		HLExpr::Specialise(subexpr, refs) => {
+			Ok(HLTypeRef(desugar_qual_id(subexpr, ParserError::TypeExpected)?, refs.clone()))
+		}
+		_ => Err(ParserError::TypeExpected)
+	}
+}
 
 fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 	match expr {
-		HLExpr::ID(qid) => {
-			if qid.len() == 1 {
-				let var = qid.first().unwrap().clone();
-				Ok(UncheckedExpr(ExprKind::LocalGet(var)))
-			} else {
-				Ok(UncheckedExpr(ExprKind::GlobalGet(qid.clone())))
-			}
+		HLExpr::ID(var) => {
+			Ok(UncheckedExpr(ExprKind::LocalGet(*var)))
 		}
 		HLExpr::Binary(lhs, op, rhs) if *op == *ASSIGN_OP => {
 			match lhs {
-				box HLExpr::ID(syms) if syms.len() == 1 => {
+				box HLExpr::ID(var) => {
 					// Assign to local
-					let var   = syms.first().unwrap().clone();
 					let value = Box::new(desugar_expr(&*rhs)?);
-					Ok(UncheckedExpr(ExprKind::LocalSet(var, value)))
+					Ok(UncheckedExpr(ExprKind::LocalSet(*var, value)))
 				}
 				box HLExpr::PropAccess(obj, sym) => {
 					// Set property
@@ -581,16 +614,29 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 			let obj = Box::new(desugar_expr(&*obj)?);
 			Ok(UncheckedExpr(ExprKind::MethodCall(obj, *sym, vec![])))
 		}
+		HLExpr::NamespaceAccess(obj, sym) => {
+			// Standalone, this is only valid for accessing a global constant
+			// For now, just don't let these work on specialised types...
+			let type_ref = desugar_type_ref(&*obj)?;
+			Ok(UncheckedExpr(ExprKind::GlobalGet(type_ref, *sym)))
+		}
+		HLExpr::Specialise(_, _) => Err(ParserError::UnexpectedSpecialisation),
 		HLExpr::Call(box HLExpr::PropAccess(obj, sym), args) => {
 			// Call on a property becomes a method call
 			let obj  = Box::new(desugar_expr(&*obj)?);
 			let args = args.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
 			Ok(UncheckedExpr(ExprKind::MethodCall(obj, *sym, args)))
 		}
-		HLExpr::Call(box HLExpr::ID(qid), args) => {
-			// Call on a qualified ID becomes a function call
+		HLExpr::Call(box HLExpr::NamespaceAccess(ns, sym), args) => {
+			// Call on a namespace access becomes a static method call
+			let typeref = desugar_type_ref(&*ns)?;
 			let args = args.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
-			Ok(UncheckedExpr(ExprKind::FunctionCall(qid.clone(), args)))
+			Ok(UncheckedExpr(ExprKind::FunctionCall(typeref, *sym, args)))
+		}
+		HLExpr::Call(box HLExpr::ID(sym), args) => {
+			// Call on a naked ID becomes a plain function call
+			let args = args.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
+			Ok(UncheckedExpr(ExprKind::FunctionCall(HLTypeRef(vec![], vec![]), *sym, args)))
 		}
 		HLExpr::Call(_, _) => Err(ParserError::InvalidCall),
 		HLExpr::If(cond, if_true, if_false) => {
@@ -620,7 +666,7 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 
 struct CodeParseContext<'a> {
 	parent: &'a ParseContext,
-	locals: Vec<(Type, Symbol)>
+	locals: Vec<(TypeRef, Symbol)>
 }
 
 impl<'a> CodeParseContext<'a> {
@@ -631,16 +677,30 @@ impl<'a> CodeParseContext<'a> {
 			let owner_name = func.name.split_last().unwrap().1;
 			let owner_node = symtab.root.resolve(owner_name).unwrap();
 			let owner_type = owner_node.get_type().unwrap();
-			locals.push((owner_type, id!(self)));
+			locals.push((TypeRef(owner_type, vec![]), id!(self)));
 		}
-		locals.extend(func.arguments.iter().cloned());
+		for (styp, sym) in &func.arguments {
+			match styp {
+				// calling fill_gap here is ugly but works for now
+				SpecType::Type(_, _) => locals.push((styp.fill_gap(&[]), *sym)),
+				SpecType::Placeholder(_) => panic!("unimplemented custom generic functions")
+			}
+		}
 		CodeParseContext {
 			parent: parent_ctx,
 			locals
 		}
 	}
 
-	fn resolve_local_var(&mut self, sym: &Symbol) -> Result<(usize, Type)> {
+	fn resolve_typeref(&mut self, symtab: &SymbolTable, r: &HLTypeRef) -> Result<TypeRef> {
+		let typ = symtab.root.resolve(&r.0).ok_or(ParserError::TypeIsMissing)?;
+		let typ = typ.get_type().ok_or(ParserError::TypeIsMissing)?;
+		typ.ensure_complete()?;
+		let refs = r.1.iter().map(|sr| self.resolve_typeref(symtab, &sr)).collect::<Result<Vec<TypeRef>>>()?;
+		Ok(TypeRef(typ, refs))
+	}
+
+	fn resolve_local_var(&mut self, sym: &Symbol) -> Result<(usize, TypeRef)> {
 		for (i, (var_type, var_name)) in self.locals.iter().enumerate().rev() {
 			if sym == var_name {
 				return Ok((i, var_type.clone()));
@@ -668,40 +728,45 @@ impl<'a> CodeParseContext<'a> {
 			LocalSet(sym, value) => {
 				let (id, var_type) = self.resolve_local_var(sym)?;
 				let value_expr = self.typecheck_expr(value)?;
-				Type::ensure_equal(&var_type, &value_expr.typ)?;
+				TypeRef::ensure_equal(&var_type, &value_expr.typ)?;
 				let typ = value_expr.typ.clone();
 				Ok(Expr { expr: LocalSetResolved(id, Box::new(value_expr)), typ })
 			}
 			LocalGetResolved(_) => unreachable!(),
 			LocalSetResolved(_, _) => unreachable!(),
-			GlobalGet(qid) => {
+			GlobalGet(typeref, sym) => {
 				// right now this is JUST for enum constants
-				let (sym, node_name) = qid.split_last().unwrap();
-				let node = symtab.root.resolve(node_name).ok_or(ParserError::MissingNamespace)?;
-				let const_node = node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
+				let parent_node = symtab.root.resolve(&typeref.0).ok_or(ParserError::MissingNamespace)?;
+				let parent_typ = parent_node.get_type().ok_or(ParserError::TypeIsMissing)?;
+				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
+				let const_node = parent_node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
 				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound)?;
+				let typ = typ.fill_gap(&specials);
 
-				Ok(Expr { expr: GlobalGet(qid.clone()), typ })
+				Ok(Expr { expr: GlobalGetResolved(TypeRef(parent_typ, specials), *sym), typ })
 			}
-			FunctionCall(qid, args) => {
+			GlobalGetResolved(_, _) => unreachable!(),
+			FunctionCall(typeref, sym, args) => {
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
-				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
-				let func = symtab.root.resolve(qid).ok_or(ParserError::FunctionIsMissing)?;
+				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<TypeRef>>();
+				let parent_typ = symtab.root.resolve(&typeref.0).ok_or(ParserError::TypeIsMissing)?;
+				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
+				let func = parent_typ.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
-				let func = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
-				let return_type = func.return_type.clone();
+				let func = variants.iter().find(|f| f.matches_types(&specials, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
+				let return_type = func.return_type.fill_gap(&specials);
 				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_types, arg_exprs), typ: return_type })
 			}
 			FunctionCallResolved(_, _, _) => unreachable!(),
 			MethodCall(obj, sym, args) => {
 				let obj_expr = self.typecheck_expr(obj)?;
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
-				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<Type>>();
-				let type_node = symtab.root.resolve(&obj_expr.typ.name).expect("type missing");
+				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<TypeRef>>();
+				let type_node = symtab.root.resolve(&obj_expr.typ.0.name).expect("type missing");
 				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
 				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
-				let method = variants.iter().find(|f| f.matches_types(&arg_types)).ok_or(ParserError::NoMatchingOverload)?;
-				let return_type = method.return_type.clone();
+				let method = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
+				let return_type = method.return_type.fill_gap(&obj_expr.typ.1);
 				Ok(Expr { expr: MethodCallResolved(Box::new(obj_expr), *sym, arg_types, arg_exprs), typ: return_type })
 			}
 			MethodCallResolved(_, _, _, _) => unreachable!(),
@@ -709,19 +774,19 @@ impl<'a> CodeParseContext<'a> {
 				// don't use scoped_typecheck_expr here so the locals carry on into branches
 				let orig_local_depth = self.locals.len();
 				let cond_expr = self.typecheck_expr(cond)?;
-				Type::err_if_not_equal(&cond_expr.typ, &symtab.bool_type, ParserError::BadIfConditionType)?;
+				TypeRef::err_if_not_equal(&cond_expr.typ, &TypeRef(symtab.bool_type.clone(), vec![]), ParserError::BadIfConditionType)?;
 				let if_true_expr = self.scoped_typecheck_expr(if_true)?;
 				let if_false_expr = if_false.as_ref().map(|e| self.scoped_typecheck_expr(&e)).transpose()?;
 				let typ = match &if_false_expr {
 					Some(e) if e.typ == if_true_expr.typ => e.typ.clone(),
-					_                                    => symtab.void_type.clone()
+					_                                    => TypeRef(symtab.void_type.clone(), vec![])
 				};
 				self.locals.truncate(orig_local_depth);
 				Ok(Expr { expr: If(Box::new(cond_expr), Box::new(if_true_expr), if_false_expr.map(Box::new)), typ })
 			}
 			Let(sym, value) => {
 				let value_expr = self.typecheck_expr(value)?;
-				Type::err_if_equal(&value_expr.typ, &symtab.void_type, ParserError::LocalCannotBeVoid)?;
+				TypeRef::err_if_equal(&value_expr.typ, &TypeRef(symtab.void_type.clone(), vec![]), ParserError::LocalCannotBeVoid)?;
 				self.locals.push((value_expr.typ.clone(), *sym));
 				let typ = value_expr.typ.clone();
 				Ok(Expr { expr: Let(*sym, Box::new(value_expr)), typ })
@@ -732,14 +797,14 @@ impl<'a> CodeParseContext<'a> {
 				self.locals.truncate(orig_local_depth);
 				let final_type = match exprs.last() {
 					Some(e) => e.typ.clone(),
-					None    => symtab.void_type.clone()
+					None    => TypeRef(symtab.void_type.clone(), vec![])
 				};
 				Ok(Expr { expr: CodeBlock(exprs), typ: final_type })
 			}
-			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: symtab.int_type.clone() }),
-			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: symtab.real_type.clone() }),
-			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: symtab.bool_type.clone() }),
-			Str(s)  => Ok(Expr { expr: Str(s.clone()),  typ: symtab.str_type.clone() }),
+			Int(v)  => Ok(Expr { expr: Int(v.clone()),  typ: TypeRef(symtab.int_type.clone(), vec![]) }),
+			Real(v) => Ok(Expr { expr: Real(v.clone()), typ: TypeRef(symtab.real_type.clone(), vec![]) }),
+			Bool(v) => Ok(Expr { expr: Bool(v.clone()), typ: TypeRef(symtab.bool_type.clone(), vec![]) }),
+			Str(s)  => Ok(Expr { expr: Str(s.clone()),  typ: TypeRef(symtab.str_type.clone(), vec![]) }),
 		}
 	}
 }
@@ -782,9 +847,9 @@ mod tests {
 		match (a, b) {
 			(LocalGet(a), LocalGet(b)) => a == b,
 			(LocalSet(a0, a1), LocalSet(b0, b1)) => (a0 == b0) && exprs_equal(&a1.0, &b1.0),
-			(GlobalGet(a), GlobalGet(b)) => a == b,
-			(FunctionCall(a0, a1), FunctionCall(b0, b1)) => {
-				(a0 == b0) && vec_equal(a1, b1)
+			(GlobalGet(a0, a1), GlobalGet(b0, b1)) => (a0 == b0) && (a1 == b1),
+			(FunctionCall(a0, a1, a2), FunctionCall(b0, b1, b2)) => {
+				(a0 == b0) && (a1 == b1) && vec_equal(a2, b2)
 			}
 			(MethodCall(a0, a1, a2), MethodCall(b0, b1, b2)) => {
 				exprs_equal(&a0.0, &b0.0) && (a1 == b1) && vec_equal(a2, b2)
@@ -817,13 +882,13 @@ mod tests {
 	#[test]
 	fn test_desugar_get() {
 		check_desugar_ok(
-			HL::ID(qid!(foo)),
+			HL::ID(id!(foo)),
 			LocalGet(id!(foo))
 		);
 
 		check_desugar_ok(
-			HL::ID(qid!(foo:bar)),
-			GlobalGet(qid!(foo:bar))
+			HL::NamespaceAccess(Box::new(HL::ID(id!(foo))), id!(bar)),
+			GlobalGet(HLTypeRef(qid!(foo), vec![]), id!(bar))
 		);
 	}
 
@@ -831,7 +896,7 @@ mod tests {
 	fn test_desugar_assign_ok() {
 		let hl_int1 = Box::new(HL::Int(Ok(1)));
 		let int1 = box_expr(Int(Ok(1)));
-		let hl_foo = Box::new(HL::ID(qid!(foo)));
+		let hl_foo = Box::new(HL::ID(id!(foo)));
 
 		check_desugar_ok(
 			HL::Binary(hl_foo.clone(), id!("="), hl_int1.clone()),
@@ -852,7 +917,7 @@ mod tests {
 			);
 		}
 
-		check(HL::ID(qid!(a:b)));
+		check(HL::NamespaceAccess(Box::new(HL::ID(id!(a))), id!(b)));
 		check(HL::Int(Ok(1)));
 		check(HL::Real(Ok(1.)));
 		check(HL::Bool(true));
@@ -862,11 +927,15 @@ mod tests {
 	#[test]
 	fn test_desugar_calls() {
 		check_desugar_ok(
-			HL::Call(Box::new(HL::ID(qid!(a))), vec![]),
-			FunctionCall(qid!(a), vec![])
+			HL::Call(Box::new(HL::ID(id!(a))), vec![]),
+			FunctionCall(HLTypeRef(vec![], vec![]), id!(a), vec![])
 		);
 		check_desugar_ok(
-			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(qid!(a))), id!(b))), vec![]),
+			HL::Call(Box::new(HL::NamespaceAccess(Box::new(HL::ID(id!(a))), id!(b))), vec![]),
+			FunctionCall(HLTypeRef(qid!(a), vec![]), id!(b), vec![])
+		);
+		check_desugar_ok(
+			HL::Call(Box::new(HL::PropAccess(Box::new(HL::ID(id!(a))), id!(b))), vec![]),
 			MethodCall(box_expr(LocalGet(id!(a))), id!(b), vec![])
 		);
 		check_desugar_err(
@@ -906,12 +975,12 @@ mod tests {
 		let pc = ParseContext::new();
 		let symtab = pc.symtab_rc.borrow();
 
-		let func = Function::new_incomplete(qid!(test), false, symtab.void_type.clone(), vec![], 0);
+		let func = Function::new_incomplete(qid!(test), false, SpecType::Type(symtab.void_type.clone(), vec![]), vec![], 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
-		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, symtab.bool_type.clone());
-		assert_eq!(cpc.typecheck_expr(&expr(Int(Ok(5)))).unwrap().typ, symtab.int_type.clone());
-		assert_eq!(cpc.typecheck_expr(&expr(Real(Ok(5.)))).unwrap().typ, symtab.real_type.clone());
+		assert_eq!(cpc.typecheck_expr(&expr(Bool(true))).unwrap().typ, TypeRef(symtab.bool_type.clone(), vec![]));
+		assert_eq!(cpc.typecheck_expr(&expr(Int(Ok(5)))).unwrap().typ, TypeRef(symtab.int_type.clone(), vec![]));
+		assert_eq!(cpc.typecheck_expr(&expr(Real(Ok(5.)))).unwrap().typ, TypeRef(symtab.real_type.clone(), vec![]));
 	}
 
 	#[test]
@@ -919,20 +988,39 @@ mod tests {
 		let pc = ParseContext::new();
 		let symtab = pc.symtab_rc.borrow();
 
-		let args = vec![(symtab.int_type.clone(), id!(var))];
-		let func = Function::new_incomplete(qid!(test), false, symtab.void_type.clone(), args, 0);
+		let args = vec![(SpecType::Type(symtab.int_type.clone(), vec![]), id!(var))];
+		let func = Function::new_incomplete(qid!(test), false, SpecType::Type(symtab.void_type.clone(), vec![]), args, 0);
 		let mut cpc = CodeParseContext::new(&pc, &func);
 
 		// Get
 		let e = cpc.typecheck_expr(&expr(LocalGet(id!(var))));
-		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
+		assert_eq!(e.unwrap().typ, TypeRef(symtab.int_type.clone(), vec![]));
 		let e = cpc.typecheck_expr(&expr(LocalGet(id!(nevar))));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound);
 
 		// Set
 		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Int(Ok(5))))));
-		assert_eq!(e.unwrap().typ, symtab.int_type.clone());
+		assert_eq!(e.unwrap().typ, TypeRef(symtab.int_type.clone(), vec![]));
 		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Bool(false)))));
 		assert!(e.is_err() && e.unwrap_err() == ParserError::TypeMismatch);
+	}
+
+	#[test]
+	fn test_generic_func() {
+		let pc = ParseContext::new();
+		let symtab = pc.symtab_rc.borrow();
+
+		let func = Function::new_incomplete(qid!(test), false, SpecType::Type(symtab.void_type.clone(), vec![]), vec![], 0);
+		let mut cpc = CodeParseContext::new(&pc, &func);
+
+		let maybe_typ = symtab.root.resolve(qid_slice!(Maybe)).unwrap().get_type().unwrap();
+
+		let maybe_str_e = HLTypeRef(qid!(Maybe), vec![HLTypeRef(qid!(str), vec![])]);
+
+		let maybe_str_none = expr(GlobalGet(maybe_str_e.clone(), id!(None)));
+		assert_eq!(cpc.typecheck_expr(&maybe_str_none).unwrap().typ, TypeRef(maybe_typ.clone(), vec![TypeRef(symtab.str_type.clone(), vec![])]));
+
+		let maybe_str_just = expr(FunctionCall(maybe_str_e, id!(Just), vec![expr(Str("hello".to_string()))]));
+		assert_eq!(cpc.typecheck_expr(&maybe_str_just).unwrap().typ, TypeRef(maybe_typ.clone(), vec![TypeRef(symtab.str_type.clone(), vec![])]));
 	}
 }

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 impl SymbolTable {
-	fn add_binary_bool<F: Fn(&Rc<RefCell<SymbolTable>>, &[Type], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: Symbol, f: F) -> Result<(), SymTabError> {
+	fn add_binary_bool<F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static>(&mut self, typ: Type, name: Symbol, f: F) -> Result<(), SymTabError> {
 		self.add_builtin_method(
 			true, &typ, name,
 			&self.bool_type.clone(), &[(typ.clone(), id!("v"))],
@@ -34,13 +34,11 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let any_ = symtab.any_type.clone();
 	let any_ = || { any_.clone() };
 
-	let maybe_str = Type::from_body(
-		qid!(MaybeStr),
-		TypeBody::Enum(vec![
-			(id!(None), vec![]),
-			(id!(Just), vec![(str_(), id!(s))]),
-		])
-	);
+	let mut maybe = Type::from_body(qid!(Maybe), TypeBody::Incomplete);
+	*maybe.borrow_mut() = TypeBody::Enum(vec![
+		(id!(None), vec![]),
+		(id!(Just), vec![(SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]), id!(field))])
+	]);
 
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(qid![gui], TypeBody::Incomplete))?;
@@ -64,7 +62,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let togglebutton = Type::from_body(qid!(gui:ToggleButton), TypeBody::Primitive(PrimitiveType::GuiToggleButton));
 	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
 
-	symtab.add_type(maybe_str.clone())?;
+	symtab.add_type(maybe.clone())?;
 	symtab.add_type(notifier.clone())?;
 	symtab.add_type(orientation.clone())?;
 	symtab.add_type(boxt.clone())?;
@@ -84,15 +82,18 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Bool) => { bool_() };
 		(Str) => { str_() };
 		(Void) => { void_() };
-		(MaybeStr) => { maybe_str };
-		(Notifier) => { notifier };
+		(Notifier) => { notifier.clone() };
 		(GuiBox) => { boxt };
-		(GuiButton) => { button };
-		(GuiCheckButton) => { checkbutton };
-		(GuiEntry) => { entry };
-		(GuiLabel) => { label };
-		(GuiToggleButton) => { togglebutton };
-		(GuiWindow) => { window };
+		(GuiButton) => { button.clone() };
+		(GuiCheckButton) => { checkbutton.clone() };
+		(GuiEntry) => { entry.clone() };
+		(GuiLabel) => { label.clone() };
+		(GuiToggleButton) => { togglebutton.clone() };
+		(GuiWindow) => { window.clone() };
+	}
+	macro_rules! resolve_spec_type {
+		(MaybeStr) => { SpecType::Type(maybe.clone(), vec![SpecType::Type(str_(), vec![])]) };
+		($i:ident) => { SpecType::Type(resolve_type!($i), vec![]) };
 	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
@@ -121,8 +122,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
 	}
 	macro_rules! convert_arg {
-		(SymbolTable, $arg:ident) => { (void_(), id!(_DUMMY)) };
-		($arg_typ:ident, $arg:ident) => { (resolve_type!($arg_typ), id!($arg)) };
+		(SymbolTable, $arg:ident) => { (SpecType::Type(void_(), vec![]), id!(_DUMMY)) };
+		($arg_typ:ident, $arg:ident) => { (resolve_spec_type!($arg_typ), id!($arg)) };
 	}
 	macro_rules! load_arg {
 		($out:ident, SymbolTable, $_arg_iter:expr, $symtab:expr) => { let $out = $symtab; };
@@ -182,9 +183,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 		// Static method without parameters
 		($ret_typ:ident, $typ:ident, $name:tt, || $code:expr) => {
-			symtab.add_builtin_method(
+			symtab.add_builtin_generic_method(
 				false,
-				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&resolve_type!($typ), id!($name), &resolve_spec_type!($ret_typ),
 				&[],
 				move |_, _, _| {
 					#[allow(unused_variables)]
@@ -195,9 +196,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 		// Static method with parameters
 		($ret_typ:ident, $typ:ident, $name:tt, |$($arg:ident : $arg_typ:ident),*| $code:expr) => {
-			symtab.add_builtin_method(
+			symtab.add_builtin_generic_method(
 				false,
-				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&resolve_type!($typ), id!($name), &resolve_spec_type!($ret_typ),
 				&[ $( convert_arg!($arg_typ, $arg) ),* ],
 				#[allow(unused_variables)]
 				move |symtab, _, args| {
@@ -211,9 +212,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 		// Method without parameters
 		($ret_typ:ident, $typ:ident, $name:tt, |$this: ident| $code:expr) => {
-			symtab.add_builtin_method(
+			symtab.add_builtin_generic_method(
 				true,
-				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&resolve_type!($typ), id!($name), &resolve_spec_type!($ret_typ),
 				&[],
 				move |_, _, args| {
 					unpack_type!($this, $typ, args[0]);
@@ -225,9 +226,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 		// Method with parameters
 		($ret_typ:ident, $typ:ident, $name:tt, |$this: ident, $($arg:ident : $arg_typ:ident),*| $code:expr) => {
-			symtab.add_builtin_method(
+			symtab.add_builtin_generic_method(
 				true,
-				&resolve_type!($typ), id!($name), &resolve_type!($ret_typ),
+				&resolve_type!($typ), id!($name), &resolve_spec_type!($ret_typ),
 				&[ $( convert_arg!($arg_typ, $arg) ),* ],
 				#[allow(unused_variables)]
 				move |symtab, _, args| {
@@ -265,7 +266,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			let val = $val.clone();
 			$gtk_obj.$gtk_method(move |_| {
 				let not = extract_notifier!($enum_id, $notifier_id, val);
-				call_func(&symtab_rc, qid_slice!(Notifier:notify), &[not.clone()], &[], true);
+				call_func(&symtab_rc, qid_slice!(Notifier), &[], id!(notify), &[not.clone()], &[], true);
 			});
 		};
 	}
@@ -378,10 +379,14 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Str, Str, new, |s: Str| s.to_string());
 	export!(Str, Str, default, || "".to_string());
 
-	let maybe_str_c = symtab.root.resolve_mut(&maybe_str.name).unwrap().get_children_mut().unwrap();
-	maybe_str_c.insert(id!(None), SymTabNode::new_constant(maybe_str.clone(), Value::Enum(0, vec![])));
-	export!(MaybeStr, MaybeStr, Just, |s: Str| Some(s));
-	inject_enum_type(&mut symtab, maybe_str.clone(), true)?;
+	let maybe_c = symtab.root.resolve_mut(&maybe.name).unwrap().get_children_mut().unwrap();
+	maybe_c.insert(id!(None), SymTabNode::new_constant(SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]), Value::Enum(0, vec![])));
+	symtab.add_builtin_generic_method(
+		false, &maybe, id!(Just),
+		&SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]),
+		&[(SpecType::Placeholder(0), id!(value))],
+		move |_, _, args| Value::Enum(1, vec![args[0].clone()])
+	)?;
 
 	export!(Void, qid!(print), || print!("\n"));
 	export!(Void, qid!(print), |i: Int| print!("{}", i));
@@ -397,14 +402,13 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 			let target_type = arg_types[0].clone();
 			let target = args[1].clone();
 			let funcname = id!(args[2].borrow_obj().unwrap().unchecked_str());
-			let qid = qid_combine!(&target_type.name, funcname);
-			notifier.unchecked_notifier_mut().push((target, qid));
+			notifier.unchecked_notifier_mut().push((target, target_type, funcname));
 			Value::Void
 		}
 	)?;
 	export!(Void, Notifier, notify, |this, symtab: SymbolTable| {
-		for (target, func_qid) in this {
-			call_func(symtab, func_qid, &[target.clone()], &[], true);
+		for (target, target_typeref, funcname) in this {
+			call_func(symtab, &target_typeref.0.name, &target_typeref.1, *funcname, &[target.clone()], &[], true);
 		}
 	});
 
@@ -414,8 +418,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, qid!(gui:quit), || gtk::main_quit());
 
 	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
-	orientation_c.insert(id!(Horizontal), SymTabNode::new_constant(orientation.clone(), Value::Enum(0, vec![])));
-	orientation_c.insert(id!(Vertical), SymTabNode::new_constant(orientation.clone(), Value::Enum(1, vec![])));
+	orientation_c.insert(id!(Horizontal), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(0, vec![])));
+	orientation_c.insert(id!(Vertical), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(1, vec![])));
 	inject_enum_type(&mut symtab, orientation.clone(), false)?;
 
 	// ****************************************
@@ -564,18 +568,18 @@ pub fn inject_enum_type(symtab: &mut SymbolTable, typ: Type, has_fields: bool) -
 	Ok(())
 }
 
-pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, Symbol)], rename_setters: bool) -> Result<(), SymTabError> {
+pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(TypeRef, Symbol)], rename_setters: bool) -> Result<(), SymTabError> {
 	for (idx, (ftyp, fid)) in fields.iter().enumerate() {
-		symtab.add_builtin_method(
-			true, &typ, *fid, ftyp, &[],
+		symtab.add_builtin_generic_method(
+			true, &typ, *fid, &ftyp.to_spectype(), &[],
 			move |_, _, args| args[0].borrow_obj().unwrap().unchecked_record()[idx].clone()
 		)?;
 		let setter_name = id!(match rename_setters {
 			true =>  format!("_set_{}", fid.to_string()),
 			false => fid.to_string() + "="
 		});
-		symtab.add_builtin_method(
-			true, &typ, setter_name, &symtab.void_type.clone(), &[(ftyp.clone(), id!(v))],
+		symtab.add_builtin_generic_method(
+			true, &typ, setter_name, &SpecType::Type(symtab.void_type.clone(), vec![]), &[(ftyp.to_spectype(), id!(v))],
 			move |_, _, args| { args[0].borrow_obj_mut().unwrap().unchecked_record_mut()[idx] = args[1].clone(); Value::Void }
 		)?;
 	}
@@ -590,17 +594,16 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(Type, 
 			let fields = tbody.unchecked_record_fields();
 			let mut values = Vec::with_capacity(fields.len());
 			for (ftyp, _) in fields {
-				let mut ftyp_name = ftyp.name.clone();
-				ftyp_name.push(id!(default));
-				values.push(call_func(symtab, &ftyp_name, &[], &[], false).unwrap());
+				values.push(call_func(symtab, &ftyp.0.name, &ftyp.1, id!(default), &[], &[], false).unwrap());
 			}
 
 			Obj::Record(values).to_heap()
 		}
 	)?;
 
-	symtab.add_builtin_method(
-		false, &typ, id!(build), &typ, &fields,
+	let spec_fields: Vec<(SpecType, Symbol)> = fields.iter().map(|(tr, s)| (tr.to_spectype(), *s)).collect();
+	symtab.add_builtin_generic_method(
+		false, &typ, id!(build), &SpecType::Type(typ.clone(), vec![]), &spec_fields,
 		move |_, _, args| Obj::Record(args.to_vec()).to_heap()
 	)?;
 
