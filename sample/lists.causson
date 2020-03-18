@@ -1,0 +1,14 @@
+def main() -> void {
+	let list = List<int>:new()
+
+	print(str:from(list.len()))
+	print()
+
+	list.push(5)
+
+	print(str:from(list.len()))
+	print()
+
+	print(str:from(list.get(0)))
+	print()
+}

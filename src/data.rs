@@ -13,6 +13,7 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
+	List(Vec<Value>),
 	GuiBox { w : gtk::Box },
 	GuiButton { w: gtk::Button, clicked_notifier: Value },
 	GuiCheckButton { w: gtk::CheckButton, clicked_notifier: Value, toggled_notifier: Value },
@@ -46,6 +47,18 @@ impl Obj {
 		match self {
 			Obj::Record(v) => v,
 			_ => panic!("Record heapobj expected")
+		}
+	}
+	pub fn unchecked_list(&self) -> &Vec<Value> {
+		match self {
+			Obj::List(v) => v,
+			_ => panic!("List heapobj expected")
+		}
+	}
+	pub fn unchecked_list_mut(&mut self) -> &mut Vec<Value> {
+		match self {
+			Obj::List(v) => v,
+			_ => panic!("List heapobj expected")
 		}
 	}
 	pub fn unchecked_gtk_button(&self) -> &gtk::Button {

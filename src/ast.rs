@@ -132,7 +132,7 @@ pub type Program = Vec<GlobalDef>;
 // TODO: Rename to BuiltinType or even remove?
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
-	Any, Void, Bool, Int, Real, Str,
+	Any, Void, Bool, Int, Real, Str, List,
 	GuiBox, GuiButton, GuiCheckButton, GuiEntry,
 	GuiLabel, GuiToggleButton, GuiWindow,
 	Notifier

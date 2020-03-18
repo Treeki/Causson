@@ -43,6 +43,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(qid![gui], TypeBody::Incomplete))?;
 
+	let list = Type::from_body(qid!(List), TypeBody::Primitive(PrimitiveType::List));
 	let notifier = Type::from_body(qid!(Notifier), TypeBody::Primitive(PrimitiveType::Notifier));
 
 	// TODO make it easier to build enums from here...
@@ -63,6 +64,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
 
 	symtab.add_type(maybe.clone())?;
+	symtab.add_type(list.clone())?;
 	symtab.add_type(notifier.clone())?;
 	symtab.add_type(orientation.clone())?;
 	symtab.add_type(boxt.clone())?;
@@ -83,6 +85,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Str) => { str_() };
 		(Void) => { void_() };
 		(Notifier) => { notifier.clone() };
+		(List) => { list.clone() };
+		(ListMut) => { list.clone() };
 		(GuiBox) => { boxt };
 		(GuiButton) => { button.clone() };
 		(GuiCheckButton) => { checkbutton.clone() };
@@ -93,6 +97,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 	macro_rules! resolve_spec_type {
 		(MaybeStr) => { SpecType::Type(maybe.clone(), vec![SpecType::Type(str_(), vec![])]) };
+		(List) => { SpecType::Type(list.clone(), vec![SpecType::Placeholder(0)]) };
+		(ListMut) => { SpecType::Type(list.clone(), vec![SpecType::Placeholder(0)]) };
+		(Placeholder0) => { SpecType::Placeholder(0) };
+		(Placeholder1) => { SpecType::Placeholder(1) };
 		($i:ident) => { SpecType::Type(resolve_type!($i), vec![]) };
 	}
 	macro_rules! unpack_type {
@@ -112,6 +120,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 				_ => unreachable!("bad MaybeStr")
 			};
 		};
+		($out:ident, List, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_list(); };
+		($out:ident, ListMut, $e:expr) => { let mut $out = $e.borrow_obj_mut().unwrap(); let $out = $out.unchecked_list_mut(); };
 		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
 		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
 		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
@@ -120,6 +130,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
 		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_togglebutton(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
+		($out:ident, Placeholder0, $e:expr) => { let $out = $e; };
+		($out:ident, Placeholder1, $e:expr) => { let $out = $e; };
 	}
 	macro_rules! convert_arg {
 		(SymbolTable, $arg:ident) => { (SpecType::Type(void_(), vec![]), id!(_DUMMY)) };
@@ -143,6 +155,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 				Some(s) => Value::Enum(1, vec![Obj::Str(s.to_string()).to_heap()])
 			}
 		};
+		(List, $e:expr) => { Obj::List($e).to_heap() };
 		(Void, $_:tt) => { Value::Void };
 		(Notifier, $e:expr) => { $e.to_heap() };
 		(GuiBox, $e:expr) => { $e };
@@ -152,6 +165,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiLabel, $e:expr) => { $e };
 		(GuiToggleButton, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
+		(Placeholder0, $e:expr) => { $e };
+		(Placeholder1, $e:expr) => { $e };
 	}
 
 	macro_rules! export {
@@ -379,6 +394,13 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Str, Str, new, |s: Str| s.to_string());
 	export!(Str, Str, default, || "".to_string());
 
+	export!(Void, qid!(print), || print!("\n"));
+	export!(Void, qid!(print), |i: Int| print!("{}", i));
+	export!(Void, qid!(print), |r: Real| print!("{}", r));
+	export!(Void, qid!(print), |s: Str| print!("{}", s));
+
+	// ****************************************
+	// Maybe
 	let maybe_c = symtab.root.resolve_mut(&maybe.name).unwrap().get_children_mut().unwrap();
 	maybe_c.insert(id!(None), SymTabNode::new_constant(SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]), Value::Enum(0, vec![])));
 	symtab.add_builtin_generic_method(
@@ -388,11 +410,16 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		move |_, _, args| Value::Enum(1, vec![args[0].clone()])
 	)?;
 
-	export!(Void, qid!(print), || print!("\n"));
-	export!(Void, qid!(print), |i: Int| print!("{}", i));
-	export!(Void, qid!(print), |r: Real| print!("{}", r));
-	export!(Void, qid!(print), |s: Str| print!("{}", s));
+	// ****************************************
+	// List
+	export!(List, List, new, || vec![]);
+	export_getter!(List, len: IntUsize, |this| this.len());
+	export!(Void, ListMut, push, |this, v: Placeholder0| this.push(v.clone()));
+	export!(Placeholder0, ListMut, pop, |this, i: IntUsize| this.remove(i));
+	export!(Placeholder0, List, get, |this, i: IntUsize| this[i].clone());
 
+	// ****************************************
+	// Notifier
 	// These need special access that the macros don't provide
 	export!(Notifier, Notifier, new, || Obj::Notifier(vec![]));
 	symtab.add_builtin_method(
@@ -413,10 +440,14 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 
 
+	// ****************************************
+	// Core GUI functions
 	export!(Void, qid!(gui:init), || gtk::init().expect("GTK init failed"));
 	export!(Void, qid!(gui:run), || gtk::main());
 	export!(Void, qid!(gui:quit), || gtk::main_quit());
 
+	// ****************************************
+	// GuiOrientation
 	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
 	orientation_c.insert(id!(Horizontal), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(0, vec![])));
 	orientation_c.insert(id!(Vertical), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(1, vec![])));
