@@ -24,6 +24,7 @@ pub enum ParserError {
 	InvalidCall,
 	LocalCannotBeVoid,
 	BadIfConditionType,
+	BadWhileConditionType,
 	VariableNotFound,
 	ConstantNotFound,
 	MissingNamespace,
@@ -210,6 +211,10 @@ impl ParseContext {
 								if let Some(f) = f {
 									_recursive_scan(output, &f, false, methods, method_stack)?;
 								}
+							}
+							While(cond, subexpr) => {
+								_recursive_scan(output, &cond, false, methods, method_stack)?;
+								_recursive_scan(output, &subexpr, false, methods, method_stack)?;
 							}
 							Let(_, subexpr) => _recursive_scan(output, &subexpr, false, methods, method_stack)?,
 							CodeBlock(subexprs) => {
@@ -648,6 +653,11 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 			};
 			Ok(UncheckedExpr(ExprKind::If(cond, if_true, if_false)))
 		}
+		HLExpr::While(cond, subexpr) => {
+			let cond    = Box::new(desugar_expr(&*cond)?);
+			let subexpr = Box::new(desugar_expr(&*subexpr)?);
+			Ok(UncheckedExpr(ExprKind::While(cond, subexpr)))
+		}
 		HLExpr::Let(sym, value) => {
 			let value = Box::new(desugar_expr(&*value)?);
 			Ok(UncheckedExpr(ExprKind::Let(sym.clone(), value)))
@@ -783,6 +793,13 @@ impl<'a> CodeParseContext<'a> {
 				};
 				self.locals.truncate(orig_local_depth);
 				Ok(Expr { expr: If(Box::new(cond_expr), Box::new(if_true_expr), if_false_expr.map(Box::new)), typ })
+			}
+			While(cond, sub) => {
+				let cond_expr = self.scoped_typecheck_expr(cond)?;
+				let sub_expr = self.scoped_typecheck_expr(sub)?;
+				TypeRef::err_if_not_equal(&cond_expr.typ, &TypeRef(symtab.bool_type.clone(), vec![]), ParserError::BadWhileConditionType)?;
+				let typ = TypeRef(symtab.void_type.clone(), vec![]);
+				Ok(Expr { expr: While(Box::new(cond_expr), Box::new(sub_expr)), typ })
 			}
 			Let(sym, value) => {
 				let value_expr = self.typecheck_expr(value)?;
@@ -956,6 +973,20 @@ mod tests {
 				box_expr(Bool(true)),
 				box_expr(Int(Ok(1))),
 				Some(box_expr(Int(Ok(2))))
+			)
+		);
+	}
+
+	#[test]
+	fn test_desugar_while() {
+		check_desugar_ok(
+			HL::While(
+				Box::new(HL::Bool(true)),
+				Box::new(HL::Int(Ok(1)))
+			),
+			While(
+				box_expr(Bool(true)),
+				box_expr(Int(Ok(1)))
 			)
 		);
 	}

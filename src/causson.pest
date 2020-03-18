@@ -14,7 +14,7 @@ typedID = {typeRef ~ id}
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
-    termPiece = _{ifTerm | letTerm | bTrue | bFalse | id | real | int | string | ("(" ~ expr ~ ")")}
+    termPiece = _{ifTerm | whileTerm | letTerm | bTrue | bFalse | id | real | int | string | ("(" ~ expr ~ ")")}
       int = @{("+" | "-")? ~ ASCII_DIGIT+}
       real = @{int ~ "." ~ ASCII_DIGIT*}
       string = ${"\"" ~ stringInner ~ "\""}
@@ -23,6 +23,7 @@ expr = {term ~ (operator ~ term)*}
       bTrue = {"true"}
       bFalse = {"false"}
       ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}
+      whileTerm = {"while" ~ expr ~ "{" ~ codeBlock ~ "}"}
       letTerm = {"let" ~ id ~ "=" ~ expr}
     termSuffix = _{termCall | termPropAccess | termNamespaceAccess | termSpecialise}
       termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}

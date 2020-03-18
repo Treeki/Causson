@@ -98,6 +98,26 @@ impl EvalContext {
 					unreachable!("if condition is expected to be a boolean")
 				}
 			}
+			While(cond_expr, sub_expr) => {
+				loop {
+					let orig_local_depth = self.locals.len();
+					let cond = self.eval(&cond_expr);
+					self.locals.truncate(orig_local_depth);
+
+					if let Value::Bool(cond) = cond {
+						if !cond {
+							break
+						}
+					} else {
+						unreachable!("while condition is expected to be a boolean")
+					}
+
+					let orig_local_depth = self.locals.len();
+					self.eval(&sub_expr);
+					self.locals.truncate(orig_local_depth);
+				}
+				Value::Void
+			}
 			Let(_sym, sub_expr) => {
 				let value = self.eval(&sub_expr);
 				self.locals.push(value.clone());

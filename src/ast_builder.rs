@@ -109,6 +109,12 @@ fn parse_term_piece(pair: Pair) -> HLExpr {
 		Rule::int => HLExpr::Int(pair.as_str().parse()),
 		Rule::string => HLExpr::Str(pair.into_inner().next().unwrap().as_str().to_string()),
 		Rule::ifTerm => parse_if_piece(&mut pair.into_inner().peekable()),
+		Rule::whileTerm => {
+			let mut pairs = pair.into_inner();
+			let cond = Box::new(parse_hlexpr(pairs.next().unwrap()));
+			let expr = Box::new(parse_code_block(pairs.next().unwrap()));
+			HLExpr::While(cond, expr)
+		}
 		Rule::letTerm => {
 			let mut pairs = pair.into_inner();
 			let name = parse_id(pairs.next().unwrap());
@@ -171,7 +177,8 @@ fn parse_type_ref(pair: Pair) -> HLTypeRef {
 	assert_eq!(pair.as_rule(), Rule::typeRef);
 	let mut pairs = pair.into_inner();
 	let qid = parse_qualified_id(pairs.next().unwrap());
-	HLTypeRef(qid, vec![])
+	let subrefs: Vec<HLTypeRef> = pairs.map(parse_type_ref).collect();
+	HLTypeRef(qid, subrefs)
 }
 
 fn parse_typed_id(pair: Pair) -> (HLTypeRef, Symbol) {
@@ -501,6 +508,18 @@ mod tests {
 				3
 			}",
 			If(box_bool(true), Box::new(CodeBlock(vec![Int(Ok(1)), Int(Ok(2))])), Some(box_int(3)))
+		);
+	}
+
+	#[test]
+	fn test_while() {
+		use HLExpr::*;
+		assert_expr(
+			"while 1 < 2 { 5 }",
+			While(
+				Box::new(Binary(box_int(1), id!("<"), box_int(2))),
+				box_int(5)
+			)
 		);
 	}
 
