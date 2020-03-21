@@ -17,13 +17,13 @@ mod data;
 mod eval;
 mod gc;
 mod parser;
+mod pretty_print;
 mod stdlib;
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
     let code = std::fs::read_to_string(&args[1]).unwrap();
     let parsed = ast_builder::parse_causson_code(&code).unwrap();
-    println!("{:?}", parsed);
     let symtab_rc = parser::make_symtab_from_program(&parsed).unwrap();
     let result = eval::call_func(&symtab_rc, &[], &[], id!(main), &[], &[], false).unwrap();
     println!("Program Result: {:?}", result);

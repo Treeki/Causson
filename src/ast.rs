@@ -522,6 +522,7 @@ impl SymbolTable {
 		self.add_function(Function::new_builtin(qid, is_method, SpecType::Type(return_type.clone(), vec![]), cleaned_args, func))
 	}
 
+	#[allow(dead_code)]
 	pub fn add_builtin_generic_function<F>(&mut self, qid: QualID, return_type: &SpecType, args: &[(SpecType, Symbol)], func: F) -> Result<(), SymTabError>
 		where F: Fn(&Rc<RefCell<SymbolTable>>, &[TypeRef], &[Value]) -> Value + 'static
 	{

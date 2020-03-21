@@ -270,7 +270,6 @@ impl ParseContext {
 							},
 							HLCompSubDef::PropertySet(prop_id, value_expr) => {
 								let deps = scan_dependencies(value_expr, &methods)?;
-								println!("DEPS FOR {:?}: {:?}", prop_id, deps);
 								if deps.is_empty() {
 									// Static property, assign on construction
 									let parent_expr = HLExpr::ID(instance_ids[index]);
@@ -325,7 +324,6 @@ impl ParseContext {
 
 				// Connect all notifiers
 				for (upd, dep_obj, dep_prop) in prop_updates {
-					println!("upd:{:?} dep_obj:{:?} dep_prop:{:?}", upd, dep_obj, dep_prop);
 					let notifier_id = id!(format!("_n_{}", dep_prop));
 					let notifier_expr = HLExpr::PropAccess(Box::new(dep_obj), notifier_id);
 					let connect_expr = HLExpr::PropAccess(Box::new(notifier_expr), id!(connect));
@@ -378,7 +376,9 @@ impl ParseContext {
 				}
 			}
 		}
-		println!("{:?}", extra_defs);
+
+		crate::pretty_print::print_program(&mut std::io::stdout(), &extra_defs).unwrap();
+
 		Ok(extra_defs)
 	}
 
