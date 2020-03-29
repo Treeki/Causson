@@ -878,6 +878,9 @@ mod tests {
 					_                  => false
 				}
 			}
+			(While(a0, a1), While(b0, b1)) => {
+				exprs_equal(&a0.0, &b0.0) && exprs_equal(&a1.0, &b1.0)
+			}
 			(Let(a0, a1), Let(b0, b1)) => (a0 == b0) && exprs_equal(&a1.0, &b1.0),
 			(CodeBlock(a), CodeBlock(b)) => vec_equal(&a, &b),
 			(Int(a), Int(b)) => a == b,

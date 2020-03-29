@@ -7,13 +7,12 @@ use std::cell::RefCell;
 pub fn call_func(symtab_rc: &Rc<RefCell<SymbolTable>>, parent_qid: &[Symbol], specials: &[TypeRef], id: Symbol, args: &[Value], arg_types: &[TypeRef], is_method: bool) -> Option<Value> {
 	let expected_arg_count = arg_types.len() + if is_method { 1 } else { 0 };
 	assert!(args.len() == expected_arg_count);
-	let context = EvalContext { symtab_rc: Rc::clone(symtab_rc), locals: vec![] };
 	let symtab = symtab_rc.borrow();
 	let node = symtab.root.resolve(parent_qid)?;
 	let node = node.resolve(&[id])?;
 	let variants = node.get_function_variants()?;
 	let func = variants.iter().find(|f| f.matches_types(specials, arg_types) && f.is_method == is_method)?;
-	Some(context.eval_func(func, arg_types, args.to_vec()))
+	Some(EvalContext::eval_func(symtab_rc, func, arg_types, args.to_vec()))
 }
 
 pub struct EvalContext {
@@ -22,14 +21,14 @@ pub struct EvalContext {
 }
 
 impl EvalContext {
-	pub fn eval_func(&self, func: &Function, arg_types: &[TypeRef], args: Vec<Value>) -> Value {
+	pub fn eval_func(symtab_rc: &Rc<RefCell<SymbolTable>>, func: &Function, arg_types: &[TypeRef], args: Vec<Value>) -> Value {
 		match &*func.borrow() {
 			FunctionBody::Incomplete(_) => unreachable!("executing incomplete function"),
 			FunctionBody::Expr(sub_expr) => {
-				let mut sub_ctx = EvalContext { symtab_rc: Rc::clone(&self.symtab_rc), locals: args };
+				let mut sub_ctx = EvalContext { symtab_rc: Rc::clone(symtab_rc), locals: args };
 				sub_ctx.eval(&sub_expr)
 			}
-			FunctionBody::BuiltIn(f) => f(&self.symtab_rc, arg_types, &args)
+			FunctionBody::BuiltIn(f) => f(symtab_rc, arg_types, &args)
 		}
 	}
 
@@ -58,7 +57,7 @@ impl EvalContext {
 			FunctionCall(_, _, _) => unreachable!(),
 			FunctionCallResolved(func, arg_types, arg_exprs) => {
 				let args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
-				self.eval_func(func, &arg_types, args)
+				EvalContext::eval_func(&self.symtab_rc, func, &arg_types, args)
 			}
 			MethodCall(_, _, _) => unreachable!(),
 			MethodCallResolved(obj_expr, sym, arg_types, arg_exprs) => {
@@ -74,7 +73,7 @@ impl EvalContext {
 				let func = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).unwrap();
 				let mut args = arg_exprs.iter().map(|e| self.eval(&e)).collect::<Vec<Value>>();
 				args.insert(0, obj);
-				self.eval_func(func, &arg_types, args)
+				EvalContext::eval_func(&self.symtab_rc, func, &arg_types, args)
 			}
 			If(cond_expr, if_true_expr, if_false_expr) => {
 				let orig_local_depth = self.locals.len();
