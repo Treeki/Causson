@@ -16,8 +16,9 @@ pub enum Obj {
 	List(Vec<Value>),
 	GuiBox { w : gtk::Box },
 	GuiButton { w: gtk::Button, clicked_notifier: Value },
-	GuiContainer { w: gtk::Container },
 	GuiCheckButton { w: gtk::CheckButton, clicked_notifier: Value, toggled_notifier: Value },
+	GuiComboBoxText { w: gtk::ComboBoxText, changed_notifier: Value },
+	GuiContainer { w: gtk::Container },
 	GuiEntry { w: gtk::Entry, changed_notifier: Value },
 	GuiLabel { w: gtk::Label },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
@@ -92,11 +93,12 @@ impl Obj {
 	obj_type_gtk!(Box, []);
 	obj_type_gtk!(Button, [CheckButton, ToggleButton]);
 	obj_type_gtk!(CheckButton, []);
+	obj_type_gtk!(ComboBoxText, []);
 	obj_type_gtk!(Container, [Box, Window]);
 	obj_type_gtk!(Entry, []);
 	obj_type_gtk!(Label, []);
 	obj_type_gtk!(ToggleButton, [CheckButton]);
-	obj_type_gtk!(Widget, [Box, Button, CheckButton, Container, Entry, Label, ToggleButton, Window]);
+	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Label, ToggleButton, Window]);
 	obj_type_gtk!(Window, []);
 }
 

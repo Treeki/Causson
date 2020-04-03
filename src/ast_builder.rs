@@ -217,6 +217,11 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			};
 			HLCompSubDef::EventConnection(id, expr)
 		},
+		Rule::compTransientAdd => {
+			let mut pairs = pair.into_inner();
+			let expr = parse_hlexpr(pairs.next().unwrap());
+			HLCompSubDef::TransientAdd(expr)
+		},
 		Rule::compPropSet => {
 			let mut pairs = pair.into_inner();
 			let id = parse_id(pairs.next().unwrap());

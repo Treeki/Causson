@@ -250,6 +250,11 @@ impl ParseContext {
 								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_root_expr]));
 								sub_index += get_instance_weight(_sub_instance);
 							},
+							HLCompSubDef::TransientAdd(sub_expr) => {
+								let parent_expr = HLExpr::ID(instance_ids[index]);
+								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), id!(add_child));
+								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![sub_expr.clone()]));
+							},
 							HLCompSubDef::EventConnection(event_id, value_expr) => {
 								// Make a method
 								let method_id = id!(format!("_cb_{}", next_callback_id));

@@ -64,6 +64,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let box_t = map_primitive!(gui:Box);
 	let button_t = map_primitive!(gui:Button);
 	let check_button_t = map_primitive!(gui:CheckButton);
+	let combo_box_text_t = map_primitive!(gui:ComboBoxText);
 	let container_t = map_primitive!(gui:Container);
 	let entry_t = map_primitive!(gui:Entry);
 	let label_t = map_primitive!(gui:Label);
@@ -131,6 +132,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiBox) => { box_t.clone() };
 		(GuiButton) => { button_t.clone() };
 		(GuiCheckButton) => { check_button_t.clone() };
+		(GuiComboBoxText) => { combo_box_text_t.clone() };
 		(GuiContainer) => { container_t.clone() };
 		(GuiEntry) => { entry_t.clone() };
 		(GuiLabel) => { label_t.clone() };
@@ -140,6 +142,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 	macro_rules! resolve_spec_type {
 		(MaybeStr) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(str_(), vec![])]) };
+		(MaybeIntU32) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(int_(), vec![])]) };
 		(Maybe) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(List) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(ListMut) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
@@ -156,6 +159,15 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
 		($out:ident, Str, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_str(); };
+		($out:ident, MaybeIntU32, $e:expr) => {
+			let $out = $e;
+			let ind = $out.unchecked_enum_index();
+			let $out: Option<u32> = match ind {
+				0 => None,
+				1 => Some($out.unchecked_enum_args()[0].unchecked_int().try_into().unwrap()),
+				_ => unreachable!("bad MaybeInt")
+			};
+		};
 		($out:ident, MaybeStr, $e:expr) => {
 			let $out = $e;
 			let ind = $out.unchecked_enum_index();
@@ -171,6 +183,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_box(); };
 		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_button(); };
 		($out:ident, GuiCheckButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_check_button(); };
+		($out:ident, GuiComboBoxText, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_combo_box_text(); };
 		($out:ident, GuiContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_container(); };
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_entry(); };
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_label(); };
@@ -196,6 +209,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Real, $e:expr) => { Value::Real($e) };
 		(Bool, $e:expr) => { Value::Bool($e) };
 		(Str, $e:expr) => { Obj::Str($e).to_heap() };
+		(MaybeIntU32, $e:expr) => {
+			match $e {
+				None => Value::Enum(0, vec![]),
+				Some(s) => Value::Enum(1, vec![Value::Int(s.into())])
+			}
+		};
 		(MaybeStr, $e:expr) => {
 			match $e {
 				None => Value::Enum(0, vec![]),
@@ -208,6 +227,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiBox, $e:expr) => { $e };
 		(GuiButton, $e:expr) => { $e };
 		(GuiCheckButton, $e:expr) => { $e };
+		(GuiComboBoxText, $e:expr) => { $e };
 		(GuiEntry, $e:expr) => { $e };
 		(GuiLabel, $e:expr) => { $e };
 		(GuiToggleButton, $e:expr) => { $e };
@@ -551,12 +571,6 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_base_class!(GuiButton, GuiWidget);
 
 	// ****************************************
-	// GuiContainer
-	connect_gtk_container!(GuiContainer);
-	connect_gtk_widget!(GuiContainer);
-	connect_gtk_base_class!(GuiContainer, GuiWidget);
-
-	// ****************************************
 	// GuiCheckButton
 	export!(GuiCheckButton, GuiCheckButton, new, |symtab: SymbolTable| {
 		let btn = gtk::CheckButton::new();
@@ -571,6 +585,30 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_button!(GuiCheckButton);
 	connect_gtk_widget!(GuiCheckButton);
 	connect_gtk_base_class!(GuiCheckButton, GuiButton, GuiWidget);
+
+	// ****************************************
+	// GuiComboBoxText
+	export!(GuiComboBoxText, GuiComboBoxText, new, |symtab: SymbolTable| {
+		let cb = gtk::ComboBoxText::new();
+		let changed_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiComboBoxText { w: cb.clone(), changed_notifier }.to_heap();
+		connect_gtk_signal!(cb, connect_changed, GuiComboBoxText, changed_notifier, val, symtab);
+		val
+	});
+	export_notifier!(GuiComboBoxText, changed_notifier, _n_selected_index);
+	export!(Void, GuiComboBoxText, add_child, |this, s: Str| this.append_text(&s) );
+	export!(Void, GuiComboBoxText, insert_child, |this, pos: IntI32, s: Str| this.insert_text(pos, s) );
+	export!(Void, GuiComboBoxText, remove_child, |this, i: IntI32| gtk::ComboBoxTextExt::remove(this, i) );
+	export!(Void, GuiComboBoxText, remove_all, |this| this.remove_all() );
+	connect_gtk_property!(GuiComboBoxText, selected_index: MaybeIntU32, get_active, set_active);
+	connect_gtk_widget!(GuiComboBoxText);
+	connect_gtk_base_class!(GuiComboBoxText, GuiWidget);
+
+	// ****************************************
+	// GuiContainer
+	connect_gtk_container!(GuiContainer);
+	connect_gtk_widget!(GuiContainer);
+	connect_gtk_base_class!(GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiEntry
@@ -729,33 +767,4 @@ mod tests {
 		let v = eval_expr("Maybe<int>", "Maybe<int>:None");
 		assert_eq!(v.unchecked_enum_index(), 0);
 	}
-
-	/*#[test]
-	fn test_gui_from() {
-		// check that casting up and down works properly by returning some objects
-		let code = "
-		type TestObj = record {
-			gui:Button b
-			gui:Widget b_down
-			Maybe<gui:Button> b_down_up
-			gui:ToggleButton tb
-			gui:Button tb_down
-			gui:Widget tb_down_down
-			Maybe<gui:ToggleButton> tb_down_up_ok
-			Maybe<gui:ToggleButton> b_up_fail
-		}
-		def test() -> TestObj {
-			let b = gui:Button:new()
-			let b_down = gui:Widget:from(b)
-			let b_down_up = gui:Button:try_from(b_down)
-			let tb = gui:ToggleButton:new()
-			let tb_down = gui:Button:from(tb)
-			let tb_down_down = gui:Widget:from(tb)
-			let tb_down_up_ok = gui:ToggleButton:try_from(tb_down)
-			let b_up_fail = gui:ToggleButton:try_from(b)
-			TestObj:build(b, b_down, b_down_up, tb, tb_down, tb_down_down, tb_down_up_ok, b_up_fail)
-		}
-		";
-
-	}*/
 }

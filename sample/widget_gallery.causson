@@ -1,0 +1,25 @@
+component Window {
+	wnd = gui:Window {
+		gui:Box(gui:Orientation:Vertical) {
+			-- this needs pattern matching, hahah
+			--gui:Label { .text = "You have selected " + str:from(self.cb.selected_index) }
+
+			cb = gui:ComboBoxText {
+				+"test1"
+				+"test2"
+				+"test3"
+			}
+		}
+
+		.destroy -> gui:quit()
+	}
+}
+
+def main() -> void {
+	gui:init()
+	let w = Window:new()
+	w.wnd.show()
+	gui:run()
+}
+
+

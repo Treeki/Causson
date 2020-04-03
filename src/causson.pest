@@ -3,8 +3,8 @@ COMMENT = _{"--" ~ (!NEWLINE ~ ANY)*}
 
 id = @{identifierStart ~ identifierChar* ~ ("#" ~ (identifierChar | idAllowedOpChars)*)?}
   identifierStart = _{XID_START | "_"}
-  identifierChar = _{XID_START | XID_CONTINUE | "_"}
-  idAllowedOpChars = _{"+" | "-" | "*" | "/" | "<" | ">" | "=" | "!" | "&" | "|"}
+  identifierChar = _{XID_START | XID_CONTINUE | "_" | "="}
+  idAllowedOpChars = _{"+" | "-" | "*" | "/" | "<" | ">" | "!" | "&" | "|"}
 
 qualifiedID = {(id ~ ":")* ~ id}
 
@@ -60,8 +60,9 @@ gFuncDef = {"def" ~ funcSpec ~ "->" ~ typeRef ~ "{" ~ codeBlock ~ "}"}
     funcSelfArg = {"self"}
 
 gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}"}
-  compSubDef = _{compMethod | compPropSet | compEventConnection | compInstance}
+  compSubDef = _{compMethod | compPropSet | compEventConnection | compInstance | compTransientAdd}
     compPropSet = {"." ~ id ~ "=" ~ expr}
+    compTransientAdd = {"+" ~ expr}
     compEventConnection = {"." ~ id ~ "->" ~ (expr | ("{" ~ codeBlock ~ "}"))}
     compInstance = {(id ~ "=")? ~ typeRef ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
       compInstanceArgs = {"(" ~ (expr ~ ",")* ~ expr? ~ ")"}
