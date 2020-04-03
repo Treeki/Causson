@@ -361,6 +361,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 
 	macro_rules! connect_gtk_container {
 		($as_container_typ:ident) => {
+			export!(Void, $as_container_typ, add_child, |this, child: GuiWidget| {
+				this.add(child);
+			});
 			connect_gtk_property!($as_container_typ, border_width: IntU32, get_border_width, set_border_width);
 		};
 	}
@@ -369,6 +372,12 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($as_widget_typ:ident) => {
 			connect_gtk_property!($as_widget_typ, sensitive: Bool, get_sensitive, set_sensitive);
 			connect_gtk_property!($as_widget_typ, visible: Bool, get_visible, set_visible);
+			// We cannot use export!() here as we don't want to unpack the object
+			symtab.add_builtin_method(
+				true, &resolve_type!($as_widget_typ), id!(root),
+				&resolve_type!(GuiWidget), &[],
+				move |_, _, args| args[0].clone()
+			)?;
 		};
 	}
 
@@ -620,27 +629,6 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_container!(GuiWindow);
 	connect_gtk_widget!(GuiWindow);
 	connect_gtk_base_class!(GuiWindow, GuiContainer, GuiWidget);
-
-
-	// Repetitive container-adding methods
-	let container_parents = vec![window_t.clone(), box_t.clone()];
-	let container_children = vec![
-		box_t.clone(), button_t.clone(), check_button_t.clone(), entry_t.clone(),
-		label_t.clone(), toggle_button_t.clone()
-	];
-	for parent in &container_parents {
-		for child in &container_children {
-			symtab.add_builtin_method(
-				true, &parent, id!(add_child), &void_(), &[(child.clone(), id!(child))],
-				move |_, _, args| {
-					let parent_obj = args[0].borrow_obj().unwrap();
-					let child_obj = args[1].borrow_obj().unwrap();
-					parent_obj.unchecked_gui_container().add(child_obj.unchecked_gui_widget());
-					Value::Void
-				}
-			)?;
-		}
-	}
 
 	Ok(())
 }

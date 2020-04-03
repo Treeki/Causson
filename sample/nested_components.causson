@@ -1,0 +1,31 @@
+component Bits {
+	box = gui:Box(gui:Orientation:Horizontal) {
+		field = gui:Entry
+		button = gui:Button {
+			.label = self.field.text
+		}
+	}
+
+	def root() -> gui:Widget {
+		gui:Widget:from(self.box)
+	}
+}
+
+component Window {
+	wnd = gui:Window {
+		gui:Box(gui:Orientation:Vertical) {
+			Bits
+			Bits
+			Bits
+		}
+
+		.destroy -> gui:quit()
+	}
+}
+
+def main() -> void {
+	gui:init()
+	let w = Window:new()
+	w.wnd.show()
+	gui:run()
+}

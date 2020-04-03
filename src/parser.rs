@@ -245,8 +245,9 @@ impl ParseContext {
 							HLCompSubDef::Instance(_sub_instance) => {
 								let parent_expr = HLExpr::ID(instance_ids[index]);
 								let child_expr = HLExpr::ID(instance_ids[sub_index]);
+								let child_root_expr = HLExpr::PropAccess(Box::new(child_expr), id!(root));
 								let add_expr = HLExpr::PropAccess(Box::new(parent_expr), id!(add_child));
-								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_expr]));
+								new_frag.push(HLExpr::Call(Box::new(add_expr), vec![child_root_expr]));
 								sub_index += get_instance_weight(_sub_instance);
 							},
 							HLCompSubDef::EventConnection(event_id, value_expr) => {
