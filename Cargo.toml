@@ -13,4 +13,5 @@ lazy_static = "1.4.0"
 symbol = "0.1.7"
 gtk = "0.8.1"
 gio = "0.8.1"
+paste = "0.1"
 

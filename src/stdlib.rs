@@ -34,46 +34,87 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let any_ = symtab.any_type.clone();
 	let any_ = || { any_.clone() };
 
-	let mut maybe = Type::from_body(qid!(Maybe), TypeBody::Incomplete);
-	*maybe.borrow_mut() = TypeBody::Enum(vec![
-		(id!(None), vec![]),
-		(id!(Just), vec![(SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]), id!(field))])
-	]);
-
 	// TODO checkme, there should be a better way to do namespacing
 	symtab.add_type(Type::from_body(qid![gui], TypeBody::Incomplete))?;
 
-	let list = Type::from_body(qid!(List), TypeBody::Primitive(PrimitiveType::List));
-	let notifier = Type::from_body(qid!(Notifier), TypeBody::Primitive(PrimitiveType::Notifier));
+	macro_rules! map_primitive {
+		(gui : $name:ident) => {
+			paste::expr! {
+				{
+					let t = Type::from_body(qid!(gui:$name), TypeBody::Primitive(PrimitiveType::[<Gui $name>]));
+					symtab.add_type(t.clone())?;
+					t
+				}
+			}
+		};
+		($name:ident) => {
+			paste::expr! {
+				{
+					let t = Type::from_body(qid!($name), TypeBody::Primitive(PrimitiveType::$name));
+					symtab.add_type(t.clone())?;
+					t
+				}
+			}
+		};
+	}
 
-	// TODO make it easier to build enums from here...
-	let orientation = Type::from_body(
-		qid!(gui:Orientation),
-		TypeBody::Enum(vec![
-			(id!(Horizontal), vec![]),
-			(id!(Vertical), vec![]),
-		])
-	);
+	let list_t = map_primitive!(List);
+	let notifier_t = map_primitive!(Notifier);
 
-	let boxt = Type::from_body(qid!(gui:Box), TypeBody::Primitive(PrimitiveType::GuiBox));
-	let button = Type::from_body(qid!(gui:Button), TypeBody::Primitive(PrimitiveType::GuiButton));
-	let checkbutton = Type::from_body(qid!(gui:CheckButton), TypeBody::Primitive(PrimitiveType::GuiCheckButton));
-	let entry = Type::from_body(qid!(gui:Entry), TypeBody::Primitive(PrimitiveType::GuiEntry));
-	let label = Type::from_body(qid!(gui:Label), TypeBody::Primitive(PrimitiveType::GuiLabel));
-	let togglebutton = Type::from_body(qid!(gui:ToggleButton), TypeBody::Primitive(PrimitiveType::GuiToggleButton));
-	let window = Type::from_body(qid!(gui:Window), TypeBody::Primitive(PrimitiveType::GuiWindow));
+	let box_t = map_primitive!(gui:Box);
+	let button_t = map_primitive!(gui:Button);
+	let check_button_t = map_primitive!(gui:CheckButton);
+	let container_t = map_primitive!(gui:Container);
+	let entry_t = map_primitive!(gui:Entry);
+	let label_t = map_primitive!(gui:Label);
+	let toggle_button_t = map_primitive!(gui:ToggleButton);
+	let widget_t = map_primitive!(gui:Widget);
+	let window_t = map_primitive!(gui:Window);
 
-	symtab.add_type(maybe.clone())?;
-	symtab.add_type(list.clone())?;
-	symtab.add_type(notifier.clone())?;
-	symtab.add_type(orientation.clone())?;
-	symtab.add_type(boxt.clone())?;
-	symtab.add_type(button.clone())?;
-	symtab.add_type(checkbutton.clone())?;
-	symtab.add_type(entry.clone())?;
-	symtab.add_type(label.clone())?;
-	symtab.add_type(togglebutton.clone())?;
-	symtab.add_type(window.clone())?;
+	// It would have been nice to use resolve_spec_type! here, but
+	// we can't use it while building types...
+	macro_rules! build_enum_choice {
+		($choice_id:expr, $node:ident, $my_type:ident, $my_spec:ident, $key:ident, []) => {
+			$node.insert(id!($key), SymTabNode::new_constant($my_spec.clone(), Value::Enum($choice_id, vec![])));
+		};
+		($choice_id:expr, $node:ident, $my_type:ident, $my_spec:ident, $key:ident, [$( $f_id:ident : $f_ty:expr ),+]) => {
+			let n = $choice_id;
+			symtab.add_builtin_generic_method(
+				false, &$my_type, id!($key), &$my_spec,
+				&[$( ($f_ty, id!($f_id)) ),*],
+				move |_, _, args| {
+					Value::Enum(n, args.to_vec())
+				}
+			)?;
+		};
+	}
+	macro_rules! build_enum_typespec {
+		(0, $t:expr) => { SpecType::Type($t, vec![]) };
+		(1, $t:expr) => { SpecType::Type($t, vec![SpecType::Placeholder(0)]) };
+		(2, $t:expr) => { SpecType::Type($t, vec![SpecType::Placeholder(0), SpecType::Placeholder(1)]) };
+	}
+	macro_rules! build_enum {
+		($( $id:ident ):*, $placeholder_count:tt, $( $key:ident($( $f_id:ident : $f_ty:expr ),*) ),+) => {
+			{
+				let mut n = Type::from_body(qid!($($id):*), TypeBody::Incomplete);
+				*n.borrow_mut() = TypeBody::Enum(vec![
+					$( (id!($key), vec![$( ($f_ty, id!($f_id)) ),*]) ),*
+				]);
+				symtab.add_type(n.clone())?;
+				let my_spec = build_enum_typespec!($placeholder_count, n.clone());
+				let node = symtab.root.resolve_mut(&n.name).unwrap().get_children_mut().unwrap();
+				let mut choice_id: usize = 0;
+				$(
+					build_enum_choice!(choice_id, node, n, my_spec, $key, [$( $f_id : $f_ty ),*]);
+					#[allow(unused_assignments)] { choice_id += 1; }
+				)*
+				n
+			}
+		};
+	}
+
+	let orientation_t = build_enum!(gui:Orientation, 0, Horizontal(), Vertical());
+	let maybe_t = build_enum!(Maybe, 1, None(), Just(t: SpecType::Placeholder(0)));
 
 	macro_rules! resolve_type {
 		(IntI32) => { int_() };
@@ -84,25 +125,29 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Bool) => { bool_() };
 		(Str) => { str_() };
 		(Void) => { void_() };
-		(Notifier) => { notifier.clone() };
-		(List) => { list.clone() };
-		(ListMut) => { list.clone() };
-		(GuiBox) => { boxt };
-		(GuiButton) => { button.clone() };
-		(GuiCheckButton) => { checkbutton.clone() };
-		(GuiEntry) => { entry.clone() };
-		(GuiLabel) => { label.clone() };
-		(GuiToggleButton) => { togglebutton.clone() };
-		(GuiWindow) => { window.clone() };
+		(Notifier) => { notifier_t.clone() };
+		(List) => { list_t.clone() };
+		(ListMut) => { list_t.clone() };
+		(GuiBox) => { box_t.clone() };
+		(GuiButton) => { button_t.clone() };
+		(GuiCheckButton) => { check_button_t.clone() };
+		(GuiContainer) => { container_t.clone() };
+		(GuiEntry) => { entry_t.clone() };
+		(GuiLabel) => { label_t.clone() };
+		(GuiToggleButton) => { toggle_button_t.clone() };
+		(GuiWidget) => { widget_t.clone() };
+		(GuiWindow) => { window_t.clone() };
 	}
 	macro_rules! resolve_spec_type {
-		(MaybeStr) => { SpecType::Type(maybe.clone(), vec![SpecType::Type(str_(), vec![])]) };
-		(List) => { SpecType::Type(list.clone(), vec![SpecType::Placeholder(0)]) };
-		(ListMut) => { SpecType::Type(list.clone(), vec![SpecType::Placeholder(0)]) };
+		(MaybeStr) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(str_(), vec![])]) };
+		(Maybe) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Placeholder(0)]) };
+		(List) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
+		(ListMut) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(Placeholder0) => { SpecType::Placeholder(0) };
 		(Placeholder1) => { SpecType::Placeholder(1) };
 		($i:ident) => { SpecType::Type(resolve_type!($i), vec![]) };
 	}
+
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
 		($out:ident, IntU32, $e:expr) => { let $out: u32 = $e.unchecked_int().try_into().unwrap(); };
@@ -123,13 +168,15 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, List, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_list(); };
 		($out:ident, ListMut, $e:expr) => { let mut $out = $e.borrow_obj_mut().unwrap(); let $out = $out.unchecked_list_mut(); };
 		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
-		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_box(); };
-		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_button(); };
-		($out:ident, GuiCheckButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_checkbutton(); };
-		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_entry(); };
-		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_label(); };
-		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_togglebutton(); };
-		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gtk_window(); };
+		($out:ident, GuiBox, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_box(); };
+		($out:ident, GuiButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_button(); };
+		($out:ident, GuiCheckButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_check_button(); };
+		($out:ident, GuiContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_container(); };
+		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_entry(); };
+		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_label(); };
+		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_toggle_button(); };
+		($out:ident, GuiWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_widget(); };
+		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_window(); };
 		($out:ident, Placeholder0, $e:expr) => { let $out = $e; };
 		($out:ident, Placeholder1, $e:expr) => { let $out = $e; };
 	}
@@ -270,7 +317,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($typ:ident, $field_name:ident, $getter_id:ident) => {
 			symtab.add_builtin_method(
 				true,
-				&resolve_type!($typ), id!($getter_id), &notifier, &[],
+				&resolve_type!($typ), id!($getter_id), &notifier_t, &[],
 				move |_, _, args| extract_notifier!($typ, $field_name, args[0])
 			)?;
 		};
@@ -332,10 +379,38 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		};
 	}
 
-	macro_rules! connect_gtk_togglebutton {
+	macro_rules! connect_gtk_toggle_button {
 		($typ:ident) => {
 			export_notifier!($typ, toggled_notifier, _n_active);
 			connect_gtk_property!($typ, active: Bool, get_active, set_active);
+		};
+	}
+
+	macro_rules! connect_gtk_base_class {
+		($sub_typ:ident, $($base_typ:ident),+) => {
+			paste::expr! { $(
+				// We cannot use export!() here as we don't want to unpack the object
+				symtab.add_builtin_method(
+					false, &resolve_type!($base_typ), id!(from),
+					&resolve_type!($base_typ),
+					&[(resolve_type!($sub_typ), id!(obj))],
+					move |_, _, args| args[0].clone()
+				)?;
+				symtab.add_builtin_generic_method(
+					false, &resolve_type!($sub_typ), id!(try_from),
+					&SpecType::Type(maybe_t.clone(), vec![SpecType::Type(resolve_type!($sub_typ), vec![])]),
+					&[(SpecType::Type(resolve_type!($base_typ), vec![]), id!(obj))],
+					move |_, _, args| {
+						// We can safely go from base_typ to sub_typ if
+						// the value is a sub_typ, or a subclass of that
+						let obj = args[0].borrow_obj().unwrap();
+						match obj.[<is_ $sub_typ:snake>]() {
+							true  => Value::Enum(1, vec![args[0].clone()]), // Just(x)
+							false => Value::Enum(0, vec![])                 // None
+						}
+					}
+				)?;
+			)* }
 		};
 	}
 
@@ -400,17 +475,6 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, qid!(print), |s: Str| print!("{}", s));
 
 	// ****************************************
-	// Maybe
-	let maybe_c = symtab.root.resolve_mut(&maybe.name).unwrap().get_children_mut().unwrap();
-	maybe_c.insert(id!(None), SymTabNode::new_constant(SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]), Value::Enum(0, vec![])));
-	symtab.add_builtin_generic_method(
-		false, &maybe, id!(Just),
-		&SpecType::Type(maybe.clone(), vec![SpecType::Placeholder(0)]),
-		&[(SpecType::Placeholder(0), id!(value))],
-		move |_, _, args| Value::Enum(1, vec![args[0].clone()])
-	)?;
-
-	// ****************************************
 	// List
 	export!(List, List, new, || vec![]);
 	export_getter!(List, len: IntUsize, |this| this.len());
@@ -423,7 +487,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	// These need special access that the macros don't provide
 	export!(Notifier, Notifier, new, || Obj::Notifier(vec![]));
 	symtab.add_builtin_method(
-		true, &notifier, id!(connect), &void_(), &[(any_(), id!(target)), (str_(), id!(funcname))],
+		true, &notifier_t, id!(connect), &void_(), &[(any_(), id!(target)), (str_(), id!(funcname))],
 		move |_, arg_types, args| {
 			let mut notifier = args[0].borrow_obj_mut().unwrap();
 			let target_type = arg_types[0].clone();
@@ -447,28 +511,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, qid!(gui:quit), || gtk::main_quit());
 
 	// ****************************************
-	// GuiOrientation
-	let orientation_c = symtab.root.resolve_mut(&orientation.name).unwrap().get_children_mut().unwrap();
-	orientation_c.insert(id!(Horizontal), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(0, vec![])));
-	orientation_c.insert(id!(Vertical), SymTabNode::new_constant(SpecType::Type(orientation.clone(), vec![]), Value::Enum(1, vec![])));
-	inject_enum_type(&mut symtab, orientation.clone(), false)?;
-
-	// ****************************************
-	// GuiButton
-	export!(GuiButton, GuiButton, new, |symtab: SymbolTable| {
-		let button = gtk::Button::new();
-		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
-		let val = Obj::GuiButton { w: button.clone(), clicked_notifier }.to_heap();
-		connect_gtk_signal!(button, connect_clicked, GuiButton, clicked_notifier, val, symtab);
-		val
-	});
-	connect_gtk_button!(GuiButton);
-	connect_gtk_widget!(GuiButton);
-
-	// ****************************************
 	// GuiBox
 	symtab.add_builtin_method(
-		false, &boxt, id!(new), &boxt, &[(orientation.clone(), id!(orientation))],
+		false, &box_t, id!(new), &box_t, &[(orientation_t.clone(), id!(orientation))],
 		move |_, _, args| {
 			let orient = match args[0].unchecked_enum_index() {
 				0 => gtk::Orientation::Horizontal,
@@ -481,6 +526,26 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiBox, spacing: IntI32, get_spacing, set_spacing);
 	connect_gtk_container!(GuiBox);
 	connect_gtk_widget!(GuiBox);
+	connect_gtk_base_class!(GuiBox, GuiContainer, GuiWidget);
+
+	// ****************************************
+	// GuiButton
+	export!(GuiButton, GuiButton, new, |symtab: SymbolTable| {
+		let button = gtk::Button::new();
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiButton { w: button.clone(), clicked_notifier }.to_heap();
+		connect_gtk_signal!(button, connect_clicked, GuiButton, clicked_notifier, val, symtab);
+		val
+	});
+	connect_gtk_button!(GuiButton);
+	connect_gtk_widget!(GuiButton);
+	connect_gtk_base_class!(GuiButton, GuiWidget);
+
+	// ****************************************
+	// GuiContainer
+	connect_gtk_container!(GuiContainer);
+	connect_gtk_widget!(GuiContainer);
+	connect_gtk_base_class!(GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiCheckButton
@@ -493,9 +558,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		connect_gtk_signal!(btn, connect_toggled, GuiCheckButton, toggled_notifier, val, symtab);
 		val
 	});
-	connect_gtk_togglebutton!(GuiCheckButton);
+	connect_gtk_toggle_button!(GuiCheckButton);
 	connect_gtk_button!(GuiCheckButton);
 	connect_gtk_widget!(GuiCheckButton);
+	connect_gtk_base_class!(GuiCheckButton, GuiButton, GuiWidget);
 
 	// ****************************************
 	// GuiEntry
@@ -511,6 +577,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiEntry, placeholder_text: MaybeStr, get_placeholder_text, set_placeholder_text);
 	connect_gtk_property!(GuiEntry, visibility: Bool, get_visibility, set_visibility);
 	connect_gtk_widget!(GuiEntry);
+	connect_gtk_base_class!(GuiEntry, GuiWidget);
 
 	// ****************************************
 	// GuiLabel
@@ -519,6 +586,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	connect_gtk_property!(GuiLabel, text: Str, get_text, set_text);
 	connect_gtk_widget!(GuiLabel);
+	connect_gtk_base_class!(GuiLabel, GuiWidget);
 
 	// ****************************************
 	// GuiToggleButton
@@ -531,9 +599,10 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		connect_gtk_signal!(btn, connect_toggled, GuiToggleButton, toggled_notifier, val, symtab);
 		val
 	});
-	connect_gtk_togglebutton!(GuiToggleButton);
+	connect_gtk_toggle_button!(GuiToggleButton);
 	connect_gtk_button!(GuiToggleButton);
 	connect_gtk_widget!(GuiToggleButton);
+	connect_gtk_base_class!(GuiToggleButton, GuiButton, GuiWidget);
 
 	// ****************************************
 	// GuiWindow
@@ -550,13 +619,14 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiWindow, title: Str, get_title, set_title);
 	connect_gtk_container!(GuiWindow);
 	connect_gtk_widget!(GuiWindow);
+	connect_gtk_base_class!(GuiWindow, GuiContainer, GuiWidget);
 
 
 	// Repetitive container-adding methods
-	let container_parents = vec![window.clone(), boxt.clone()];
+	let container_parents = vec![window_t.clone(), box_t.clone()];
 	let container_children = vec![
-		boxt.clone(), button.clone(), checkbutton.clone(), entry.clone(),
-		label.clone(), togglebutton.clone()
+		box_t.clone(), button_t.clone(), check_button_t.clone(), entry_t.clone(),
+		label_t.clone(), toggle_button_t.clone()
 	];
 	for parent in &container_parents {
 		for child in &container_children {
@@ -565,7 +635,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 				move |_, _, args| {
 					let parent_obj = args[0].borrow_obj().unwrap();
 					let child_obj = args[1].borrow_obj().unwrap();
-					parent_obj.unchecked_gtk_container().add(child_obj.unchecked_gtk_widget());
+					parent_obj.unchecked_gui_container().add(child_obj.unchecked_gui_widget());
 					Value::Void
 				}
 			)?;
@@ -639,4 +709,65 @@ pub fn inject_record_type(symtab: &mut SymbolTable, typ: Type, fields: &[(TypeRe
 	)?;
 
 	Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::ast_builder;
+	use crate::parser;
+	use crate::eval;
+
+	fn eval_program(code: &str) -> Value {
+		let parsed = ast_builder::parse_causson_code(code).expect("test code should make a high-level AST");
+		let symtab_rc = parser::make_symtab_from_program(&parsed).expect("test code should make a symbol table");
+		eval::call_func(&symtab_rc, &[], &[], id!(test), &[], &[], false).unwrap()
+	}
+
+	fn eval_expr(typ: &str, body: &str) -> Value {
+		let code = format!("def test() -> {} {{ {} }}", typ, body);
+		eval_program(&code)
+	}
+
+	#[test]
+	fn test_maybe() {
+		let v = eval_expr("Maybe<str>", "Maybe<str>:Just(\"hello\")");
+		assert_eq!(v.unchecked_enum_index(), 1);
+		let v = &v.unchecked_enum_args()[0];
+		let v = v.borrow_obj().unwrap();
+		assert_eq!(v.unchecked_str(), "hello");
+
+		let v = eval_expr("Maybe<int>", "Maybe<int>:None");
+		assert_eq!(v.unchecked_enum_index(), 0);
+	}
+
+	/*#[test]
+	fn test_gui_from() {
+		// check that casting up and down works properly by returning some objects
+		let code = "
+		type TestObj = record {
+			gui:Button b
+			gui:Widget b_down
+			Maybe<gui:Button> b_down_up
+			gui:ToggleButton tb
+			gui:Button tb_down
+			gui:Widget tb_down_down
+			Maybe<gui:ToggleButton> tb_down_up_ok
+			Maybe<gui:ToggleButton> b_up_fail
+		}
+		def test() -> TestObj {
+			let b = gui:Button:new()
+			let b_down = gui:Widget:from(b)
+			let b_down_up = gui:Button:try_from(b_down)
+			let tb = gui:ToggleButton:new()
+			let tb_down = gui:Button:from(tb)
+			let tb_down_down = gui:Widget:from(tb)
+			let tb_down_up_ok = gui:ToggleButton:try_from(tb_down)
+			let b_up_fail = gui:ToggleButton:try_from(b)
+			TestObj:build(b, b_down, b_down_up, tb, tb_down, tb_down_down, tb_down_up_ok, b_up_fail)
+		}
+		";
+
+	}*/
 }

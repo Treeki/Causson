@@ -6,6 +6,7 @@ extern crate pest;
 extern crate pest_derive;
 #[macro_use]
 extern crate lazy_static;
+extern crate paste;
 extern crate symbol;
 extern crate gtk;
 extern crate gio;

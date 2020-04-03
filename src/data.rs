@@ -16,12 +16,65 @@ pub enum Obj {
 	List(Vec<Value>),
 	GuiBox { w : gtk::Box },
 	GuiButton { w: gtk::Button, clicked_notifier: Value },
+	GuiContainer { w: gtk::Container },
 	GuiCheckButton { w: gtk::CheckButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiEntry { w: gtk::Entry, changed_notifier: Value },
 	GuiLabel { w: gtk::Label },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
+	GuiWidget { w: gtk::Widget },
 	GuiWindow { w: gtk::Window, destroy_notifier: Value },
 	Notifier(Vec<(Value, TypeRef, Symbol)>)
+}
+
+macro_rules! obj_type {
+	($name:ident, $rust_ty:ty) => {
+		paste::item! {
+			pub fn [<unchecked_ $name:snake>](&self) -> &$rust_ty {
+				match self {
+					Obj::$name(o) => o,
+					_ => panic!(concat!(stringify!($name), " heapobj expected"))
+				}
+			}
+		}
+	};
+}
+macro_rules! obj_type_mut {
+	($name:ident, $rust_ty:ty) => {
+		paste::item! {
+			pub fn [<unchecked_ $name:snake>](&self) -> &$rust_ty {
+				match self {
+					Obj::$name(o) => o,
+					_ => panic!(concat!(stringify!($name), " heapobj expected"))
+				}
+			}
+			pub fn [<unchecked_ $name:snake _mut>](&mut self) -> &mut $rust_ty {
+				match self {
+					Obj::$name(o) => o,
+					_ => panic!(concat!(stringify!($name), " heapobj expected"))
+				}
+			}
+		}
+	};
+}
+macro_rules! obj_type_gtk {
+	($name:ident, [$($sub_name:ident),*]) => {
+		paste::item! {
+			pub fn [<unchecked_gui_ $name:snake>](&self) -> &gtk::$name {
+				match self {
+					Obj::[<Gui $name>] { w, .. } => w,
+					$( Obj::[<Gui $sub_name>] { w, .. } => w.upcast_ref(), )*
+					_ => panic!(concat!("Gui", stringify!($name), " heapobj expected"))
+				}
+			}
+			pub fn [<is_gui_ $name:snake>](&self) -> bool {
+				match self {
+					Obj::[<Gui $name>] { .. } => true,
+					$( Obj::[<Gui $sub_name>] { .. } => true, )*
+					_ => false
+				}
+			}
+		}
+	};
 }
 
 impl Obj {
@@ -31,114 +84,20 @@ impl Obj {
 		})
 	}
 
-	pub fn unchecked_str(&self) -> &String {
-		match self {
-			Obj::Str(s) => s,
-			_ => panic!("Str heapobj expected")
-		}
-	}
-	pub fn unchecked_record(&self) -> &Vec<Value> {
-		match self {
-			Obj::Record(v) => v,
-			_ => panic!("Record heapobj expected")
-		}
-	}
-	pub fn unchecked_record_mut(&mut self) -> &mut Vec<Value> {
-		match self {
-			Obj::Record(v) => v,
-			_ => panic!("Record heapobj expected")
-		}
-	}
-	pub fn unchecked_list(&self) -> &Vec<Value> {
-		match self {
-			Obj::List(v) => v,
-			_ => panic!("List heapobj expected")
-		}
-	}
-	pub fn unchecked_list_mut(&mut self) -> &mut Vec<Value> {
-		match self {
-			Obj::List(v) => v,
-			_ => panic!("List heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_button(&self) -> &gtk::Button {
-		match self {
-			Obj::GuiButton { w, .. } => w,
-			_ => panic!("GuiButton heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_checkbutton(&self) -> &gtk::CheckButton {
-		match self {
-			Obj::GuiCheckButton { w, .. } => w,
-			_ => panic!("GuiCheckButton heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_entry(&self) -> &gtk::Entry {
-		match self {
-			Obj::GuiEntry { w, .. } => w,
-			_ => panic!("GuiEntry heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_label(&self) -> &gtk::Label {
-		match self {
-			Obj::GuiLabel { w, .. } => w,
-			_ => panic!("GuiLabel heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_togglebutton(&self) -> &gtk::ToggleButton {
-		match self {
-			Obj::GuiToggleButton { w, .. } => w,
-			_ => panic!("GuiToggleButton heapobj expected")
-		}
-	}
-	pub fn unchecked_gtk_window(&self) -> &gtk::Window {
-		match self {
-			Obj::GuiWindow { w, .. } => w,
-			_ => panic!("GuiWindow heapobj expected")
-		}
-	}
+	obj_type!(Str, String);
+	obj_type_mut!(Record, Vec<Value>);
+	obj_type_mut!(List, Vec<Value>);
+	obj_type_mut!(Notifier, Vec<(Value, TypeRef, Symbol)>);
 
-	pub fn unchecked_gtk_container(&self) -> &gtk::Container {
-		match self {
-			Obj::GuiBox { w, .. } => w.upcast_ref(),
-			Obj::GuiWindow { w, .. } => w.upcast_ref(),
-			_ => panic!("gtk::Container heapobj expected")
-		}
-	}
-
-	pub fn unchecked_gtk_box(&self) -> &gtk::Box {
-		match self {
-			Obj::GuiBox { w, .. } => w,
-			_ => panic!("gtk::Box heapobj expected")
-		}
-	}
-
-	pub fn unchecked_gtk_widget(&self) -> &gtk::Widget {
-		match self {
-			Obj::GuiBox { w, .. } => w.upcast_ref(),
-			Obj::GuiButton { w, .. } => w.upcast_ref(),
-			Obj::GuiCheckButton { w, .. } => w.upcast_ref(),
-			Obj::GuiEntry { w, .. } => w.upcast_ref(),
-			Obj::GuiLabel { w, .. } => w.upcast_ref(),
-			Obj::GuiToggleButton { w, .. } => w.upcast_ref(),
-			Obj::GuiWindow { w, .. } => w.upcast_ref(),
-			_ => panic!("gtk::Widget heapobj expected")
-		}
-	}
-
-	pub fn unchecked_notifier(&self) -> &Vec<(Value, TypeRef, Symbol)> {
-		match self {
-			Obj::Notifier(v) => v,
-			_ => panic!("Notifier heapobj expected")
-		}
-	}
-
-	pub fn unchecked_notifier_mut(&mut self) -> &mut Vec<(Value, TypeRef, Symbol)> {
-		match self {
-			Obj::Notifier(v) => v,
-			_ => panic!("Notifier heapobj expected")
-		}
-	}
+	obj_type_gtk!(Box, []);
+	obj_type_gtk!(Button, [CheckButton, ToggleButton]);
+	obj_type_gtk!(CheckButton, []);
+	obj_type_gtk!(Container, [Box, Window]);
+	obj_type_gtk!(Entry, []);
+	obj_type_gtk!(Label, []);
+	obj_type_gtk!(ToggleButton, [CheckButton]);
+	obj_type_gtk!(Widget, [Box, Button, CheckButton, Container, Entry, Label, ToggleButton, Window]);
+	obj_type_gtk!(Window, []);
 }
 
 
