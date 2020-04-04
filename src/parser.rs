@@ -13,12 +13,12 @@ lazy_static! {
 #[derive(Debug, PartialEq)]
 pub enum ParserError {
 	SymTab(SymTabError),
-	TypeIsMissing,
+	TypeIsMissing(QualID),
 	TypeIsIncomplete,
 	TypeExpected,
 	TypeDependencyCycle,
 	FunctionIsMissing(Symbol),
-	NoMatchingOverload,
+	NoMatchingOverload(Symbol),
 	TypeMismatch(TypeRef, TypeRef),
 	InvalidAssignTarget,
 	InvalidCall,
@@ -26,7 +26,7 @@ pub enum ParserError {
 	BadIfConditionType,
 	BadWhileConditionType,
 	BadMatchConditionType,
-	BadMatchArmChoiceName,
+	BadMatchArmChoiceName(Symbol),
 	BadMatchArmArguments,
 	NonExhaustiveMatchArms,
 	DuplicateMatchArms,
@@ -466,8 +466,8 @@ impl ParseContext {
 	}
 
 	fn resolve_typeref(symtab: &mut SymbolTable, r: &HLTypeRef) -> Result<TypeRef> {
-		let typ = symtab.root.resolve(&r.0).ok_or(ParserError::TypeIsMissing)?;
-		let typ = typ.get_type().ok_or(ParserError::TypeIsMissing)?;
+		let typ = symtab.root.resolve(&r.0).ok_or_else(|| ParserError::TypeIsMissing(r.0.clone()))?;
+		let typ = typ.get_type().ok_or_else(|| ParserError::TypeIsMissing(r.0.clone()))?;
 		typ.ensure_complete()?;
 		let refs = r.1.iter().map(|sr| ParseContext::resolve_typeref(symtab, &sr)).collect::<Result<Vec<TypeRef>>>()?;
 		Ok(TypeRef(typ, refs))
@@ -794,8 +794,8 @@ impl<'a> CodeParseContext<'a> {
 	}
 
 	fn resolve_typeref(&mut self, symtab: &SymbolTable, r: &HLTypeRef) -> Result<TypeRef> {
-		let typ = symtab.root.resolve(&r.0).ok_or(ParserError::TypeIsMissing)?;
-		let typ = typ.get_type().ok_or(ParserError::TypeIsMissing)?;
+		let typ = symtab.root.resolve(&r.0).ok_or_else(|| ParserError::TypeIsMissing(r.0.clone()))?;
+		let typ = typ.get_type().ok_or_else(|| ParserError::TypeIsMissing(r.0.clone()))?;
 		typ.ensure_complete()?;
 		let refs = r.1.iter().map(|sr| self.resolve_typeref(symtab, &sr)).collect::<Result<Vec<TypeRef>>>()?;
 		Ok(TypeRef(typ, refs))
@@ -838,7 +838,7 @@ impl<'a> CodeParseContext<'a> {
 			GlobalGet(typeref, sym) => {
 				// right now this is JUST for enum constants
 				let parent_node = symtab.root.resolve(&typeref.0).ok_or(ParserError::MissingNamespace)?;
-				let parent_typ = parent_node.get_type().ok_or(ParserError::TypeIsMissing)?;
+				let parent_typ = parent_node.get_type().ok_or_else(|| ParserError::TypeIsMissing(typeref.0.clone()))?;
 				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
 				let const_node = parent_node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
 				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound)?;
@@ -850,11 +850,11 @@ impl<'a> CodeParseContext<'a> {
 			FunctionCall(typeref, sym, args) => {
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<TypeRef>>();
-				let parent_typ = symtab.root.resolve(&typeref.0).ok_or(ParserError::TypeIsMissing)?;
+				let parent_typ = symtab.root.resolve(&typeref.0).ok_or_else(|| ParserError::TypeIsMissing(typeref.0.clone()))?;
 				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
 				let func = parent_typ.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing(*sym))?;
 				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing(*sym))?;
-				let func = variants.iter().find(|f| f.matches_types(&specials, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
+				let func = variants.iter().find(|f| f.matches_types(&specials, &arg_types)).ok_or(ParserError::NoMatchingOverload(*sym))?;
 				let return_type = func.return_type.fill_gap(&specials);
 				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_types, arg_exprs), typ: return_type })
 			}
@@ -866,7 +866,7 @@ impl<'a> CodeParseContext<'a> {
 				let type_node = symtab.root.resolve(&obj_expr.typ.0.name).expect("type missing");
 				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing(*sym))?;
 				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing(*sym))?;
-				let method = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
+				let method = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).ok_or(ParserError::NoMatchingOverload(*sym))?;
 				let return_type = method.return_type.fill_gap(&obj_expr.typ.1);
 				Ok(Expr { expr: MethodCallResolved(Box::new(obj_expr), *sym, arg_types, arg_exprs), typ: return_type })
 			}
@@ -914,7 +914,7 @@ impl<'a> CodeParseContext<'a> {
 					} else {
 						// need to find the associated choice
 						let i = choices.iter().position(|c| c.0 == *arm_name);
-						let i = i.ok_or(ParserError::BadMatchArmChoiceName)?;
+						let i = i.ok_or(ParserError::BadMatchArmChoiceName(*arm_name))?;
 						if choices[i].1.len() != arm_args.len() {
 							return Err(ParserError::BadMatchArmArguments);
 						}

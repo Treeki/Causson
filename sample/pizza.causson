@@ -1,0 +1,275 @@
+def formatPrice(int total_pence) -> str {
+	let pounds = total_pence / 100
+	let pence = total_pence - (pounds * 100)
+	"£" + str:from(pounds) + "." + if pence <= 0 {
+		"00"
+	} elif pence < 10 {
+		"0" + str:from(pence)
+	} else {
+		str:from(pence)
+	}
+}
+
+def pricePizza(PizzaSize size, PizzaSauce sauce, List<Topping> toppings) -> int {
+	let p = size.basePrice + sauce.surcharge
+	if toppings.length > size.includedToppings {
+		p = p + size.toppingSurcharge * (toppings.length - size.includedToppings)
+	}
+	p
+}
+
+def savePizzaOrder(str filename, PizzaSize size, PizzaSauce sauce, List<Topping> toppings) -> bool {
+	match io:File:open_write(filename) {
+		None => false
+		Just(f) => {
+			f.write_text("**** THE GOOD PIZZA *****\n")
+			f.write_text("Order #0001\n")
+			f.write_text("*************************\n")
+			f.write_text("Size: ")
+			f.write_text(size.describe)
+			f.write_text("\nBase: ")
+			f.write_text(sauce.describe)
+			f.write_text("\n* * * * * * * * * * * * *\n")
+			let i = 0
+			while i < toppings.length {
+				f.write_text(" + ")
+				f.write_text(toppings.get(i).describe)
+				f.write_text("\n")
+				i = i + 1
+			}
+			f.write_text("* * * * * * * * * * * * *\n")
+			f.write_text("Total: ")
+			f.write_text(formatPrice(pricePizza(size, sauce, toppings)))
+			f.write_text("\n*************************\n")
+
+			f.close()
+			true
+		}
+	}
+}
+
+type PizzaSize = enum(S, M, L, XL)
+def PizzaSize:describe(self) -> str {
+	match self { S => "Small", M => "Medium", L => "Large", XL => "Extra Large" }
+}
+def PizzaSize:basePrice(self)  -> int { match self { S => 400, M => 600, L => 800, XL => 1400 } }
+def PizzaSize:sliceCount(self) -> int { match self { S => 4,   M => 6,   L => 10,  XL => 16 } }
+def PizzaSize:toppingSurcharge(self) -> int { self.basePrice / 5 }
+def PizzaSize:includedToppings(self) -> int { 4 }
+
+type PizzaSauce = enum(Tomato, Garlic, Chocolate)
+def PizzaSauce:describe(self) -> str {
+	match self { Tomato => "tomato", Garlic => "garlic", Chocolate => "choco" }
+}
+def PizzaSauce:surcharge(self) -> int {
+	match self { Chocolate => 80, _ => 0 }
+}
+
+type Topping = enum(\
+	Cheese, Tomato, Chicken, Oregano, Pepperoni, \
+	SweetCheese, Mallows, Beef, Bacon, Haggis, \
+	Haggis2, Chorizo, Beans, Tuna)
+
+def Topping:describe(self) -> str {
+	match self {
+		Cheese => "cheese", Tomato => "tomato", Chicken => "chicken",
+		Oregano => "oregano", Pepperoni => "pepperoni", SweetCheese => "sweet cheese",
+		Mallows => "mallows", Beef => "beef", Bacon => "bacon",
+		Haggis => "haggis", Haggis2 => "factory haggis", Chorizo => "chorizo",
+		Beans => "coffee beans", Tuna => "tuna"
+	}
+}
+
+def sizeText(PizzaSize s) -> str {
+	s.describe + " - " + str:from(s.sliceCount) + " slices (" + formatPrice(s.basePrice) + ")"
+}
+component PizzaSizeChooser {
+	combo = gui:ComboBoxText {
+		+sizeText(PizzaSize:S)
+		+sizeText(PizzaSize:M)
+		+sizeText(PizzaSize:L)
+		+sizeText(PizzaSize:XL)
+		.selected_index = Maybe<int>:Just(0)
+		.border_width = 10
+	}
+
+	dynamic int price = self.selectedSize().basePrice()
+	dynamic int toppingSurcharge = self.selectedSize().toppingSurcharge()
+	dynamic int includedToppings = self.selectedSize().includedToppings()
+
+	def selectedSize() -> PizzaSize {
+		match self.combo.selected_index {
+			Just(i) => {
+				if   i == 0 { PizzaSize:S } \
+				elif i == 1 { PizzaSize:M } \
+				elif i == 2 { PizzaSize:L } \
+				elif i == 3 { PizzaSize:XL } \
+				else { PizzaSize:S }
+			}
+			None => PizzaSize:S
+		}
+	}
+
+	def root() -> gui:Widget { gui:Widget:from(self.combo) }
+}
+
+component PizzaToppingsChooser {
+	toppingPrice = int(0)
+	includedToppings = int(0)
+	dynamic int price = \
+		if self.selectedToppingCount > self.includedToppings {
+			self.toppingPrice * (self.selectedToppingCount - self.includedToppings)
+		} else {
+			0
+		}
+
+	box = gui:Box(gui:Orientation:Vertical) {
+		.border_width = 10
+		.spacing = 5
+		gui:Label {
+			.markup = "<i>(Price includes up to " + \
+					  str:from(self.includedToppings) + " toppings, " + \
+					  formatPrice(self.toppingPrice) + " each afterwards)</i>"
+		}
+
+		gui:Box(gui:Orientation:Horizontal) {
+			gui:Box(gui:Orientation:Vertical) {
+				cheese = gui:CheckButton {
+					.label = "Cheese"
+					.active = true
+				}
+				tomato      = gui:CheckButton { .label = "Sun-dried tomatoes" }
+				chicken     = gui:CheckButton { .label = "Grilled chicken" }
+				oregano     = gui:CheckButton { .label = "Hand-chopped oregano" }
+				pepperoni   = gui:CheckButton { .label = "Pepperoni (sliced)" }
+				sweetCheese = gui:CheckButton { .label = "Sweet cheese" }
+				mallows     = gui:CheckButton { .label = "Marshmallows" }
+			}
+			gui:Box(gui:Orientation:Vertical) {
+				beef    = gui:CheckButton { .label = "Grounded beef" }
+				bacon   = gui:CheckButton { .label = "Bacon pieces" }
+				haggis  = gui:CheckButton { .label = "Homemade haggis" }
+				haggis2 = gui:CheckButton { .label = "Factory-made haggis" }
+				chorizo = gui:CheckButton { .label = "Spicy chorizo" }
+				beans   = gui:CheckButton { .label = "Fairtrade coffee beans" }
+				tuna    = gui:CheckButton { .label = "Dolphin-friendly tuna" }
+			}
+		}
+	}
+
+	def selectedToppings() -> List<Topping> {
+		let list = List<Topping>:new()
+		if self.cheese.active      { list.push(Topping:Cheese) }
+		if self.tomato.active      { list.push(Topping:Tomato) }
+		if self.chicken.active     { list.push(Topping:Chicken) }
+		if self.oregano.active     { list.push(Topping:Oregano) }
+		if self.pepperoni.active   { list.push(Topping:Pepperoni) }
+		if self.sweetCheese.active { list.push(Topping:SweetCheese) }
+		if self.mallows.active     { list.push(Topping:Mallows) }
+		if self.beef.active        { list.push(Topping:Beef) }
+		if self.bacon.active       { list.push(Topping:Bacon) }
+		if self.haggis.active      { list.push(Topping:Haggis) }
+		if self.haggis2.active     { list.push(Topping:Haggis2) }
+		if self.chorizo.active     { list.push(Topping:Chorizo) }
+		if self.beans.active       { list.push(Topping:Beans) }
+		if self.tuna.active        { list.push(Topping:Tuna) }
+		list
+	}
+
+	dynamic int selectedToppingCount = self.selectedToppings().length()
+
+	def root() -> gui:Widget { gui:Widget:from(self.box) }
+}
+
+component PizzaSauceChooser {
+	box = gui:Box(gui:Orientation:Horizontal) {
+		.border_width = 10
+		.spacing = 20
+
+		tomato = gui:RadioButton         { .label = "Tomato" }
+		garlic = gui:RadioButton(tomato) { .label = "Garlic" }
+		choc   = gui:RadioButton(tomato) { .label = "Chocolate (+80p)" }
+	}
+
+	dynamic int price = self.selectedSauce().surcharge()
+	def selectedSauce() -> PizzaSauce {
+		if   self.tomato.active { PizzaSauce:Tomato } \
+		elif self.garlic.active { PizzaSauce:Garlic } \
+		elif self.choc.active   { PizzaSauce:Chocolate } \
+		else { PizzaSauce:Tomato } -- error case!
+	}
+
+	def root() -> gui:Widget { gui:Widget:from(self.box) }
+}
+
+component PizzaDemo {
+	box = gui:Box(gui:Orientation:Horizontal) {
+		.border_width = 10
+		.spacing = 10
+		gui:Box(gui:Orientation:Vertical) {
+			.spacing = 10
+
+			-- Welcome Message
+			gui:Label { .markup = "<b><big>Welcome to Goodpizza</big></b>" }
+			gui:Label { .markup = "<i>Home of the Big Toste!️</i>" }
+
+			gui:Frame {
+				.label = Maybe<str>:Just("Step 1: Pick a size")
+				size = PizzaSizeChooser
+			}
+
+			gui:Frame {
+				.label = Maybe<str>:Just("Step 2: Pick a sauce")
+				sauce = PizzaSauceChooser
+			}
+
+			gui:Frame {
+				.label = Maybe<str>:Just("Step 3: Pick toppings")
+				toppings = PizzaToppingsChooser {
+					.toppingPrice = self.size.toppingSurcharge
+					.includedToppings = self.size.includedToppings
+				}
+			}
+
+			gui:Label {
+				.markup = "Your total is " + formatPrice(self.total())
+			}
+
+			gui:Button {
+				.label = "Generate Order"
+				.clicked -> {
+					savePizzaOrder("pizza.txt", self.size.selectedSize(), self.sauce.selectedSauce(), self.toppings.selectedToppings())
+					gui:alert("Your pizza order has been saved to 'pizza.txt'.")
+				}
+			}
+		}
+
+		gui:Image("sample/pizza.gif")
+	}
+
+	def total() -> int {
+		self.size.price + self.sauce.price + self.toppings.price
+	}
+
+	def root() -> gui:Widget { gui:Widget:from(self.box) }
+}
+
+
+component DemoWindow {
+	wnd = gui:Window {
+		.title = "Pizza Ordering Demo"
+		PizzaDemo
+		.destroy -> gui:quit()
+	}
+}
+
+
+def main() -> void {
+	gui:init()
+	let w = DemoWindow:new()
+	w.wnd.show()
+	gui:run()
+}
+
+
+
