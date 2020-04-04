@@ -21,6 +21,7 @@ pub enum Obj {
 	GuiContainer { w: gtk::Container },
 	GuiEntry { w: gtk::Entry, changed_notifier: Value },
 	GuiLabel { w: gtk::Label },
+	GuiNotebook { w: gtk::Notebook, pending_labels: Vec<String> },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiWidget { w: gtk::Widget },
 	GuiWindow { w: gtk::Window, destroy_notifier: Value },
@@ -77,6 +78,24 @@ macro_rules! obj_type_gtk {
 		}
 	};
 }
+macro_rules! obj_type_mut_field {
+	($name:ident, $field:ident, $rust_ty:ty) => {
+		paste::item! {
+			pub fn [<unchecked_ $name:snake _ $field>](&self) -> &$rust_ty {
+				match self {
+					Obj::$name { $field, .. } => $field,
+					_ => panic!(concat!(stringify!($name), " heapobj expected"))
+				}
+			}
+			pub fn [<unchecked_ $name:snake _ $field _mut>](&mut self) -> &mut $rust_ty {
+				match self {
+					Obj::$name { $field, .. } => $field,
+					_ => panic!(concat!(stringify!($name), " heapobj expected"))
+				}
+			}
+		}
+	};
+}
 
 impl Obj {
 	pub fn to_heap(self) -> Value {
@@ -97,8 +116,10 @@ impl Obj {
 	obj_type_gtk!(Container, [Box, Window]);
 	obj_type_gtk!(Entry, []);
 	obj_type_gtk!(Label, []);
+	obj_type_gtk!(Notebook, []);
+	obj_type_mut_field!(GuiNotebook, pending_labels, Vec<String>);
 	obj_type_gtk!(ToggleButton, [CheckButton]);
-	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Label, ToggleButton, Window]);
+	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Label, Notebook, ToggleButton, Window]);
 	obj_type_gtk!(Window, []);
 }
 

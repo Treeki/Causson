@@ -1,16 +1,29 @@
+component TestComp {
+	box = gui:Box(gui:Orientation:Vertical) {
+		gui:Label { .text = "Hello" }
+	}
+	
+	def root() -> gui:Widget { gui:Widget:from(self.box) }
+}
+
 component Window {
 	wnd = gui:Window {
-		gui:Box(gui:Orientation:Vertical) {
-			-- this needs pattern matching, hahah
-			--gui:Label { .text = "You have selected " + str:from(self.cb.selected_index) }
+		gui:Notebook {
+			+"Tab 1"
+			gui:Box(gui:Orientation:Vertical) {
+				-- this needs pattern matching, hahah
+				--gui:Label { .text = "You have selected " + str:from(self.cb.selected_index) }
 
-			cb = gui:ComboBoxText {
-				+"test1"
-				+"test2"
-				+"test3"
+				cb = gui:ComboBoxText {
+					+"test1"
+					+"test2"
+					+"test3"
+				}
 			}
-		}
 
+			+"Tab 2"
+			TestComp
+		}
 		.destroy -> gui:quit()
 	}
 }

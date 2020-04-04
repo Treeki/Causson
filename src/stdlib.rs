@@ -68,6 +68,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let container_t = map_primitive!(gui:Container);
 	let entry_t = map_primitive!(gui:Entry);
 	let label_t = map_primitive!(gui:Label);
+	let notebook_t = map_primitive!(gui:Notebook);
 	let toggle_button_t = map_primitive!(gui:ToggleButton);
 	let widget_t = map_primitive!(gui:Widget);
 	let window_t = map_primitive!(gui:Window);
@@ -136,6 +137,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiContainer) => { container_t.clone() };
 		(GuiEntry) => { entry_t.clone() };
 		(GuiLabel) => { label_t.clone() };
+		(GuiNotebook) => { notebook_t.clone() };
+		(GuiNotebookRaw) => { notebook_t.clone() };
 		(GuiToggleButton) => { toggle_button_t.clone() };
 		(GuiWidget) => { widget_t.clone() };
 		(GuiWindow) => { window_t.clone() };
@@ -187,6 +190,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiContainer, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_container(); };
 		($out:ident, GuiEntry, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_entry(); };
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_label(); };
+		($out:ident, GuiNotebook, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_notebook(); };
+		($out:ident, GuiNotebookRaw, $e:expr) => { let $out = $e; };
 		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_toggle_button(); };
 		($out:ident, GuiWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_widget(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_window(); };
@@ -230,6 +235,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiComboBoxText, $e:expr) => { $e };
 		(GuiEntry, $e:expr) => { $e };
 		(GuiLabel, $e:expr) => { $e };
+		(GuiNotebook, $e:expr) => { $e };
 		(GuiToggleButton, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
 		(Placeholder0, $e:expr) => { $e };
@@ -634,6 +640,25 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_property!(GuiLabel, text: Str, get_text, set_text);
 	connect_gtk_widget!(GuiLabel);
 	connect_gtk_base_class!(GuiLabel, GuiWidget);
+
+	// ****************************************
+	// GuiNotebook
+	export!(GuiNotebook, GuiNotebook, new, |symtab: SymbolTable| {
+		Obj::GuiNotebook { w: gtk::Notebook::new(), pending_labels: vec![] }.to_heap()
+	});
+	export!(Void, GuiNotebookRaw, add_child, |this, s: Str| {
+		this.borrow_obj_mut().unwrap().unchecked_gui_notebook_pending_labels_mut().push(s.to_string());
+	});
+	export!(Void, GuiNotebookRaw, add_child, |this, w: GuiWidget| {
+		let have_name = !this.borrow_obj().unwrap().unchecked_gui_notebook_pending_labels().is_empty();
+		let name = if have_name { this.borrow_obj_mut().unwrap().unchecked_gui_notebook_pending_labels_mut().remove(0) } else { "Tab".to_string() };
+		let nb = this.borrow_obj().unwrap();
+		let nb = nb.unchecked_gui_notebook();
+		nb.add(w);
+		nb.set_tab_label_text(w, &name);
+	});
+	connect_gtk_widget!(GuiNotebook);
+	connect_gtk_base_class!(GuiNotebook, GuiWidget);
 
 	// ****************************************
 	// GuiToggleButton

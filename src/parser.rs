@@ -17,7 +17,7 @@ pub enum ParserError {
 	TypeIsIncomplete,
 	TypeExpected,
 	TypeDependencyCycle,
-	FunctionIsMissing,
+	FunctionIsMissing(Symbol),
 	NoMatchingOverload,
 	TypeMismatch,
 	InvalidAssignTarget,
@@ -767,8 +767,8 @@ impl<'a> CodeParseContext<'a> {
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<TypeRef>>();
 				let parent_typ = symtab.root.resolve(&typeref.0).ok_or(ParserError::TypeIsMissing)?;
 				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
-				let func = parent_typ.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
-				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
+				let func = parent_typ.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing(*sym))?;
+				let variants = func.get_function_variants().ok_or(ParserError::FunctionIsMissing(*sym))?;
 				let func = variants.iter().find(|f| f.matches_types(&specials, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = func.return_type.fill_gap(&specials);
 				Ok(Expr { expr: FunctionCallResolved(func.clone(), arg_types, arg_exprs), typ: return_type })
@@ -779,8 +779,8 @@ impl<'a> CodeParseContext<'a> {
 				let arg_exprs = args.iter().map(|e| self.scoped_typecheck_expr(e)).collect::<Result<Vec<Expr>>>()?;
 				let arg_types = arg_exprs.iter().map(|e| e.typ.clone()).collect::<Vec<TypeRef>>();
 				let type_node = symtab.root.resolve(&obj_expr.typ.0.name).expect("type missing");
-				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing)?;
-				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing)?;
+				let method = type_node.resolve(&[*sym]).ok_or(ParserError::FunctionIsMissing(*sym))?;
+				let variants = method.get_function_variants().ok_or(ParserError::FunctionIsMissing(*sym))?;
 				let method = variants.iter().find(|f| f.matches_types(&obj_expr.typ.1, &arg_types)).ok_or(ParserError::NoMatchingOverload)?;
 				let return_type = method.return_type.fill_gap(&obj_expr.typ.1);
 				Ok(Expr { expr: MethodCallResolved(Box::new(obj_expr), *sym, arg_types, arg_exprs), typ: return_type })
