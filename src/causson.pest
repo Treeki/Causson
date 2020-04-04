@@ -14,7 +14,7 @@ typedID = {typeRef ~ id}
 // Expressions
 expr = {term ~ (operator ~ term)*}
   term = {termPiece ~ termSuffix*}
-    termPiece = _{ifTerm | whileTerm | letTerm | bTrue | bFalse | id | real | int | string | ("(" ~ expr ~ ")")}
+    termPiece = _{ifTerm | whileTerm | letTerm | matchTerm | bTrue | bFalse | id | real | int | string | ("(" ~ expr ~ ")")}
       int = @{("+" | "-")? ~ ASCII_DIGIT+}
       real = @{int ~ "." ~ ASCII_DIGIT*}
       string = ${"\"" ~ stringInner ~ "\""}
@@ -25,6 +25,9 @@ expr = {term ~ (operator ~ term)*}
       ifTerm = {"if" ~ expr ~ "{" ~ codeBlock ~ "}" ~ ("elif" ~ expr ~ "{" ~ codeBlock ~ "}")* ~ ("else" ~ "{" ~ codeBlock ~ "}")?}
       whileTerm = {"while" ~ expr ~ "{" ~ codeBlock ~ "}"}
       letTerm = {"let" ~ id ~ "=" ~ expr}
+      matchTerm = {"match" ~ expr ~ "{" ~ NEWLINE* ~ (matchArm ~ (NEWLINE | ",")+)+ ~ matchArm? ~ "}"}
+        matchArm = {matchArmSpec ~ "=>" ~ (expr | ("{" ~ codeBlock ~ "}"))}
+          matchArmSpec = {id ~ ("(" ~ id ~ ("," ~ id)* ~ ")")?}
     termSuffix = _{termCall | termPropAccess | termNamespaceAccess | termSpecialise}
       termCall = {("(" ~ ")") | ("(" ~ expr ~ ("," ~ expr)* ~ ")")}
       termPropAccess = {"." ~ id}

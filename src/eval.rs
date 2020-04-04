@@ -117,6 +117,21 @@ impl EvalContext {
 				}
 				Value::Void
 			}
+			Match(_, _) => unreachable!(),
+			MatchResolved(value_expr, choice_arms, default_arm) => {
+				let value = self.eval(&value_expr);
+				let index = value.unchecked_enum_index();
+				let orig_local_depth = self.locals.len();
+				let result = if choice_arms[index].is_some() {
+					self.locals.extend_from_slice(&value.unchecked_enum_args());
+					self.eval(choice_arms[index].as_ref().unwrap())
+				} else {
+					self.eval(default_arm.as_ref().unwrap())
+				};
+				self.locals.truncate(orig_local_depth);
+				let symtab = self.symtab_rc.borrow();
+				if expr.typ.0 == symtab.void_type { Value::Void } else { result }
+			}
 			Let(_sym, sub_expr) => {
 				let value = self.eval(&sub_expr);
 				self.locals.push(value.clone());

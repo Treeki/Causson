@@ -100,6 +100,25 @@ fn parse_if_piece<'i, P>(pairs: &mut std::iter::Peekable<P>) -> HLExpr where P: 
 	}
 }
 
+fn parse_match_arm_spec(pair: Pair) -> (Symbol, Vec<Symbol>) {
+	let mut pairs = pair.into_inner();
+	let choice = parse_id(pairs.next().unwrap());
+	let args = pairs.map(parse_id).collect();
+	(choice, args)
+}
+
+fn parse_match_arm(pair: Pair) -> (Symbol, Vec<Symbol>, HLExpr) {
+	let mut pairs = pair.into_inner();
+	let (choice, args) = parse_match_arm_spec(pairs.next().unwrap());
+	let code_pair = pairs.next().unwrap();
+	let code_expr = match code_pair.as_rule() {
+		Rule::expr => parse_hlexpr(code_pair),
+		Rule::codeBlock => parse_code_block(code_pair),
+		_ => unreachable!()
+	};
+	(choice, args, code_expr)
+}
+
 fn parse_term_piece(pair: Pair) -> HLExpr {
 	match pair.as_rule() {
 		Rule::id => HLExpr::ID(parse_id(pair)),
@@ -120,6 +139,12 @@ fn parse_term_piece(pair: Pair) -> HLExpr {
 			let name = parse_id(pairs.next().unwrap());
 			let value = Box::new(parse_hlexpr(pairs.next().unwrap()));
 			HLExpr::Let(name, value)
+		}
+		Rule::matchTerm => {
+			let mut pairs = pair.into_inner();
+			let cond = Box::new(parse_hlexpr(pairs.next().unwrap()));
+			let arms = pairs.map(parse_match_arm).collect();
+			HLExpr::Match(cond, arms)
 		}
 		Rule::expr => parse_hlexpr(pair),
 		_ => unreachable!()
@@ -524,6 +549,33 @@ mod tests {
 			While(
 				Box::new(Binary(box_int(1), id!("<"), box_int(2))),
 				box_int(5)
+			)
+		);
+	}
+
+	#[test]
+	fn test_match() {
+		use HLExpr::*;
+		assert_expr(
+			"match x(5) { a => 1, b(z) => 3 }",
+			Match(
+				Box::new(Call(box_id(id!(x)), vec![Int(Ok(5))])),
+				vec![
+					(id!(a), vec![], Int(Ok(1))),
+					(id!(b), vec![id!(z)], Int(Ok(3)))
+				]
+			)
+		);
+		assert_expr(
+			"match a {\na => {1}\nb => 2, c => 3\nd => 4\n}",
+			Match(
+				box_id(id!(a)),
+				vec![
+					(id!(a), vec![], Int(Ok(1))),
+					(id!(b), vec![], Int(Ok(2))),
+					(id!(c), vec![], Int(Ok(3))),
+					(id!(d), vec![], Int(Ok(4)))
+				]
 			)
 		);
 	}

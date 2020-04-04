@@ -25,6 +25,11 @@ pub enum ParserError {
 	LocalCannotBeVoid,
 	BadIfConditionType,
 	BadWhileConditionType,
+	BadMatchConditionType,
+	BadMatchArmChoiceName,
+	BadMatchArmArguments,
+	NonExhaustiveMatchArms,
+	DuplicateMatchArms,
 	VariableNotFound,
 	ConstantNotFound,
 	MissingNamespace,
@@ -215,6 +220,12 @@ impl ParseContext {
 							While(cond, subexpr) => {
 								_recursive_scan(output, &cond, false, methods, method_stack)?;
 								_recursive_scan(output, &subexpr, false, methods, method_stack)?;
+							}
+							Match(cond, arms) => {
+								_recursive_scan(output, &cond, false, methods, method_stack)?;
+								for (_, _, body) in arms {
+									_recursive_scan(output, &body, false, methods, method_stack)?;
+								}
 							}
 							Let(_, subexpr) => _recursive_scan(output, &subexpr, false, methods, method_stack)?,
 							CodeBlock(subexprs) => {
@@ -668,6 +679,14 @@ fn desugar_expr(expr: &HLExpr) -> Result<UncheckedExpr> {
 			let value = Box::new(desugar_expr(&*value)?);
 			Ok(UncheckedExpr(ExprKind::Let(sym.clone(), value)))
 		}
+		HLExpr::Match(cond, arms) => {
+			let cond = Box::new(desugar_expr(&*cond)?);
+			let arms = arms.iter().map(|(c, args, subexpr)| {
+				let subexpr = desugar_expr(&subexpr)?;
+				Ok((*c, args.clone(), subexpr))
+			}).collect::<Result<Vec<(Symbol, Vec<Symbol>, UncheckedExpr)>>>()?;
+			Ok(UncheckedExpr(ExprKind::Match(cond, arms)))
+		}
 		HLExpr::CodeBlock(exprs) => {
 			let exprs = exprs.iter().map(desugar_expr).collect::<Result<Vec<UncheckedExpr>>>()?;
 			Ok(UncheckedExpr(ExprKind::CodeBlock(exprs)))
@@ -807,6 +826,76 @@ impl<'a> CodeParseContext<'a> {
 				let typ = TypeRef(symtab.void_type.clone(), vec![]);
 				Ok(Expr { expr: While(Box::new(cond_expr), Box::new(sub_expr)), typ })
 			}
+			Match(cond, arms) => {
+				let cond_expr = self.scoped_typecheck_expr(cond)?;
+				let cond_typebody = cond_expr.typ.0.borrow();
+				let choices = match &*cond_typebody {
+					TypeBody::Enum(choices) => choices,
+					_ => return Err(ParserError::BadMatchConditionType)
+				};
+				let mut arm_exprs: Vec<Option<Expr>> = Vec::new();
+				let mut default_arm: Option<Box<Expr>> = None;
+				arm_exprs.resize(choices.len(), None);
+
+				for (arm_name, arm_args, arm_expr) in arms {
+					let orig_local_depth = self.locals.len();
+					let index = if arm_name == &"_" {
+						// default arm
+						if default_arm.is_some() {
+							return Err(ParserError::DuplicateMatchArms);
+						}
+						None
+					} else {
+						// need to find the associated choice
+						let i = choices.iter().position(|c| c.0 == *arm_name);
+						let i = i.ok_or(ParserError::BadMatchArmChoiceName)?;
+						if choices[i].1.len() != arm_args.len() {
+							return Err(ParserError::BadMatchArmArguments);
+						}
+						if arm_exprs[i].is_some() {
+							return Err(ParserError::DuplicateMatchArms);
+						}
+						for (arg_name, (arg_typespec, _)) in arm_args.iter().zip(&choices[i].1) {
+							self.locals.push((arg_typespec.fill_gap(&cond_expr.typ.1), *arg_name));
+						}
+						Some(i)
+					};
+
+					let arm_expr = self.typecheck_expr(arm_expr)?;
+					self.locals.truncate(orig_local_depth);
+
+					// now, place it
+					match index {
+						None    => default_arm = Some(Box::new(arm_expr)),
+						Some(i) => arm_exprs[i] = Some(arm_expr)
+					};
+				}
+
+				let typ = match &default_arm {
+					None => {
+						// there can be no empty arms in this case
+						if arm_exprs.iter().any(Option::is_none) {
+							return Err(ParserError::NonExhaustiveMatchArms)
+						} else if arm_exprs.iter().all(|e| e.as_ref().unwrap().typ == arm_exprs[0].as_ref().unwrap().typ) {
+							arm_exprs[0].as_ref().unwrap().typ.clone()
+						} else {
+							TypeRef(symtab.void_type.clone(), vec![])
+						}
+					}
+					Some(default_arm) => {
+						// we only return a non-void type if every arm returns that type
+						if arm_exprs.iter().all(|e| e.is_none() || e.as_ref().unwrap().typ == default_arm.typ) {
+							default_arm.typ.clone()
+						} else {
+							TypeRef(symtab.void_type.clone(), vec![])
+						}
+					}
+				};
+
+				drop(cond_typebody); // ah, gotta love the borrow checker,
+				Ok(Expr { expr: MatchResolved(Box::new(cond_expr), arm_exprs, default_arm), typ })
+			}
+			MatchResolved(_, _, _) => unreachable!(),
 			Let(sym, value) => {
 				let value_expr = self.typecheck_expr(value)?;
 				TypeRef::err_if_equal(&value_expr.typ, &TypeRef(symtab.void_type.clone(), vec![]), ParserError::LocalCannotBeVoid)?;
@@ -886,6 +975,11 @@ mod tests {
 			}
 			(While(a0, a1), While(b0, b1)) => {
 				exprs_equal(&a0.0, &b0.0) && exprs_equal(&a1.0, &b1.0)
+			}
+			(Match(a0, a1), Match(b0, b1)) => {
+				exprs_equal(&a0.0, &b0.0) && (a1.len() == b1.len()) && (a1.iter().zip(b1).all(|(i,j)|
+					(i.0 == j.0) && (i.1 == j.1) && exprs_equal(&(i.2).0, &(j.2).0)
+				))
 			}
 			(Let(a0, a1), Let(b0, b1)) => (a0 == b0) && exprs_equal(&a1.0, &b1.0),
 			(CodeBlock(a), CodeBlock(b)) => vec_equal(&a, &b),
@@ -996,6 +1090,26 @@ mod tests {
 			While(
 				box_expr(Bool(true)),
 				box_expr(Int(Ok(1)))
+			)
+		);
+	}
+
+	#[test]
+	fn test_desugar_match() {
+		check_desugar_ok(
+			HL::Match(
+				Box::new(HL::Int(Ok(1))),
+				vec![
+					(id!(a), vec![], HL::Bool(true)),
+					(id!(b), vec![id!(z)], HL::Bool(false))
+				]
+			),
+			Match(
+				box_expr(Int(Ok(1))),
+				vec![
+					(id!(a), vec![], expr(Bool(true))),
+					(id!(b), vec![id!(z)], expr(Bool(false)))
+				]
 			)
 		);
 	}

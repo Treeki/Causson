@@ -503,6 +503,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Real, Real, new, |r: Real| r);
 	export!(Real, Real, default, || 0.);
 
+	export!(Real, Real, from, |i: Int| i as f64);
+	export!(Int, Int, from, |r: Real| r as i64);
+
 	export_binary!(Bool, Str, "op#==", |a, b| a == b);
 	export_binary!(Bool, Str, "op#!=", |a, b| a != b);
 	export_binary!(Str, Str, "op#+", |a, b| {

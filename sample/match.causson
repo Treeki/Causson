@@ -1,0 +1,36 @@
+
+type Shape = enum(IndistinctBlob, Circle(int r), Rectangle(int w, int h))
+
+def Shape:describe(self) -> str {
+	match self {
+		IndistinctBlob => "an indistinct blob",
+		Circle(r) => "a circle of radius " + str:from(r),
+		_ => "something else 👀"
+	}
+}
+
+def Shape:area(self) -> Maybe<int> {
+	match self {
+		Circle(r)       => Maybe<int>:Just(int:from(real:from(r * r) * 3.14159)),
+		Rectangle(a, b) => Maybe<int>:Just(a * b),
+		_               => Maybe<int>:None
+	}
+}
+
+def str:from(Maybe<int> mi) -> str {
+	match mi {
+		Just(n) => str:from(n),
+		None    => "👻"
+	}
+}
+
+def main() -> void {
+	print(Shape:IndistinctBlob.describe)
+	print()
+	print(Shape:Circle(5).describe)
+	print()
+	print(Shape:Rectangle(10, 20).describe)
+	print()
+	print(str:from(Shape:Circle(12).area))
+	print()
+}

@@ -132,7 +132,35 @@ impl HLExpr {
 				write!(output, "while ")?;
 				cond.pretty_print(output, indent)?;
 				writeln!(output, " {{")?;
-				body.pretty_print(output, indent + 1)?;
+				body.pretty_print_block(output, indent + 1)?;
+				do_indent(output, indent)?;
+				write!(output, "}}")?;
+			}
+			Match(cond, arms) => {
+				write!(output, "match ")?;
+				cond.pretty_print(output, indent)?;
+				writeln!(output, " {{")?;
+				for (arm_index, (choice_id, args, body)) in arms.iter().enumerate() {
+					if arm_index > 0 {
+						writeln!(output, ",")?;
+					}
+					do_indent(output, indent + 1)?;
+					write!(output, "{}", choice_id)?;
+					if !args.is_empty() {
+						write!(output, "(")?;
+						for (arg_index, arg) in args.iter().enumerate() {
+							if arg_index > 0 {
+								write!(output, ", ")?;
+							}
+							write!(output, "{}", arg)?;
+						}
+						write!(output, ")")?;
+					}
+					writeln!(output, " => {{")?;
+					body.pretty_print_block(output, indent + 2)?;
+					do_indent(output, indent + 1)?;
+					write!(output, "}}")?;
+				}
 				do_indent(output, indent)?;
 				write!(output, "}}")?;
 			}
