@@ -24,6 +24,7 @@ pub enum Obj {
 	GuiImage { w: gtk::Image },
 	GuiLabel { w: gtk::Label },
 	GuiNotebook { w: gtk::Notebook, pending_labels: Vec<String> },
+	GuiRadioButton { w: gtk::RadioButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiWidget { w: gtk::Widget },
 	GuiWindow { w: gtk::Window, destroy_notifier: Value },
@@ -114,18 +115,19 @@ impl Obj {
 	obj_type_mut!(IoFile, Option<std::fs::File>);
 
 	obj_type_gtk!(Box, []);
-	obj_type_gtk!(Button, [CheckButton, ToggleButton]);
-	obj_type_gtk!(CheckButton, []);
+	obj_type_gtk!(Button, [CheckButton, RadioButton, ToggleButton]);
+	obj_type_gtk!(CheckButton, [RadioButton]);
 	obj_type_gtk!(ComboBoxText, []);
-	obj_type_gtk!(Container, [Box, Frame, Window]);
+	obj_type_gtk!(Container, [Box, Button, CheckButton, ComboBoxText, Frame, Notebook, ToggleButton, Window]);
 	obj_type_gtk!(Entry, []);
 	obj_type_gtk!(Frame, []);
 	obj_type_gtk!(Image, []);
 	obj_type_gtk!(Label, []);
 	obj_type_gtk!(Notebook, []);
 	obj_type_mut_field!(GuiNotebook, pending_labels, Vec<String>);
-	obj_type_gtk!(ToggleButton, [CheckButton]);
-	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Frame, Image, Label, Notebook, ToggleButton, Window]);
+	obj_type_gtk!(RadioButton, []);
+	obj_type_gtk!(ToggleButton, [CheckButton, RadioButton]);
+	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Frame, Image, Label, Notebook, RadioButton, ToggleButton, Window]);
 	obj_type_gtk!(Window, []);
 }
 

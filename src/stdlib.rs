@@ -82,6 +82,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let image_t = map_primitive!(gui:Image);
 	let label_t = map_primitive!(gui:Label);
 	let notebook_t = map_primitive!(gui:Notebook);
+	let radio_button_t = map_primitive!(gui:RadioButton);
 	let toggle_button_t = map_primitive!(gui:ToggleButton);
 	let widget_t = map_primitive!(gui:Widget);
 	let window_t = map_primitive!(gui:Window);
@@ -156,6 +157,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiLabel) => { label_t.clone() };
 		(GuiNotebook) => { notebook_t.clone() };
 		(GuiNotebookRaw) => { notebook_t.clone() };
+		(GuiRadioButton) => { radio_button_t.clone() };
 		(GuiToggleButton) => { toggle_button_t.clone() };
 		(GuiWidget) => { widget_t.clone() };
 		(GuiWindow) => { window_t.clone() };
@@ -214,6 +216,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiLabel, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_label(); };
 		($out:ident, GuiNotebook, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_notebook(); };
 		($out:ident, GuiNotebookRaw, $e:expr) => { let $out = $e; };
+		($out:ident, GuiRadioButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_radio_button(); };
 		($out:ident, GuiToggleButton, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_toggle_button(); };
 		($out:ident, GuiWidget, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_widget(); };
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_window(); };
@@ -262,6 +265,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiImage, $e:expr) => { $e };
 		(GuiLabel, $e:expr) => { $e };
 		(GuiNotebook, $e:expr) => { $e };
+		(GuiRadioButton, $e:expr) => { $e };
 		(GuiToggleButton, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
 		(IoFile, $e:expr) => { Obj::IoFile($e).to_heap() };
@@ -413,11 +417,17 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	}
 
 	macro_rules! connect_gtk_container {
-		($as_container_typ:ident) => {
+		($as_container_typ:ident, true) => {
 			export!(Void, $as_container_typ, add_child, |this, child: GuiWidget| {
 				this.add(child);
 			});
+		};
+		($as_container_typ:ident, false) => {
 			connect_gtk_property!($as_container_typ, border_width: IntU32, get_border_width, set_border_width);
+		};
+		($as_container_typ:ident) => {
+			connect_gtk_container!($as_container_typ, true);
+			connect_gtk_container!($as_container_typ, false);
 		};
 	}
 
@@ -603,8 +613,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		val
 	});
 	connect_gtk_button!(GuiButton);
+	connect_gtk_container!(GuiButton);
 	connect_gtk_widget!(GuiButton);
-	connect_gtk_base_class!(GuiButton, GuiWidget);
+	connect_gtk_base_class!(GuiButton, GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiCheckButton
@@ -619,8 +630,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	connect_gtk_toggle_button!(GuiCheckButton);
 	connect_gtk_button!(GuiCheckButton);
+	connect_gtk_container!(GuiCheckButton);
 	connect_gtk_widget!(GuiCheckButton);
-	connect_gtk_base_class!(GuiCheckButton, GuiButton, GuiWidget);
+	connect_gtk_base_class!(GuiCheckButton, GuiToggleButton, GuiButton, GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiComboBoxText
@@ -637,8 +649,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, GuiComboBoxText, remove_child, |this, i: IntI32| gtk::ComboBoxTextExt::remove(this, i) );
 	export!(Void, GuiComboBoxText, remove_all, |this| this.remove_all() );
 	connect_gtk_property!(GuiComboBoxText, selected_index: MaybeIntU32, get_active, set_active);
+	connect_gtk_container!(GuiComboBoxText);
 	connect_gtk_widget!(GuiComboBoxText);
-	connect_gtk_base_class!(GuiComboBoxText, GuiWidget);
+	connect_gtk_base_class!(GuiComboBoxText, GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiContainer
@@ -707,8 +720,35 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		nb.add(w);
 		nb.set_tab_label_text(w, &name);
 	});
+	connect_gtk_container!(GuiNotebook, false); // lets us override add_child
 	connect_gtk_widget!(GuiNotebook);
-	connect_gtk_base_class!(GuiNotebook, GuiWidget);
+	connect_gtk_base_class!(GuiNotebook, GuiContainer, GuiWidget);
+
+	// ****************************************
+	// GuiRadioButton
+	export!(GuiRadioButton, GuiRadioButton, new, |symtab: SymbolTable| {
+		let btn = gtk::RadioButton::new();
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let toggled_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiRadioButton { w: btn.clone(), clicked_notifier, toggled_notifier }.to_heap();
+		connect_gtk_signal!(btn, connect_clicked, GuiRadioButton, clicked_notifier, val, symtab);
+		connect_gtk_signal!(btn, connect_toggled, GuiRadioButton, toggled_notifier, val, symtab);
+		val
+	});
+	export!(GuiRadioButton, GuiRadioButton, new, |symtab: SymbolTable, other: GuiRadioButton| {
+		let btn = gtk::RadioButton::new_from_widget(other);
+		let clicked_notifier = Obj::Notifier(vec![]).to_heap();
+		let toggled_notifier = Obj::Notifier(vec![]).to_heap();
+		let val = Obj::GuiRadioButton { w: btn.clone(), clicked_notifier, toggled_notifier }.to_heap();
+		connect_gtk_signal!(btn, connect_clicked, GuiRadioButton, clicked_notifier, val, symtab);
+		connect_gtk_signal!(btn, connect_toggled, GuiRadioButton, toggled_notifier, val, symtab);
+		val
+	});
+	connect_gtk_toggle_button!(GuiRadioButton);
+	connect_gtk_button!(GuiRadioButton);
+	connect_gtk_container!(GuiRadioButton);
+	connect_gtk_widget!(GuiRadioButton);
+	connect_gtk_base_class!(GuiRadioButton, GuiCheckButton, GuiToggleButton, GuiButton, GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiToggleButton
@@ -723,8 +763,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	});
 	connect_gtk_toggle_button!(GuiToggleButton);
 	connect_gtk_button!(GuiToggleButton);
+	connect_gtk_container!(GuiToggleButton);
 	connect_gtk_widget!(GuiToggleButton);
-	connect_gtk_base_class!(GuiToggleButton, GuiButton, GuiWidget);
+	connect_gtk_base_class!(GuiToggleButton, GuiButton, GuiContainer, GuiWidget);
 
 	// ****************************************
 	// GuiWindow

@@ -138,7 +138,7 @@ pub type Program = Vec<GlobalDef>;
 pub enum PrimitiveType {
 	Any, Void, Bool, Int, Real, Str, List,
 	GuiBox, GuiButton, GuiCheckButton, GuiComboBoxText, GuiContainer, GuiEntry,
-	GuiFrame, GuiImage, GuiLabel, GuiNotebook, GuiToggleButton, GuiWidget, GuiWindow,
+	GuiFrame, GuiImage, GuiLabel, GuiNotebook, GuiRadioButton, GuiToggleButton, GuiWidget, GuiWindow,
 	IoFile,
 	Notifier
 }
