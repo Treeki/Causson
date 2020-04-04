@@ -3,6 +3,7 @@ use crate::data::*;
 use crate::eval::*;
 use symbol::Symbol;
 use std::convert::TryInto;
+use std::fs::OpenOptions;
 use gtk::prelude::*;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -34,10 +35,19 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let any_ = symtab.any_type.clone();
 	let any_ = || { any_.clone() };
 
-	// TODO checkme, there should be a better way to do namespacing
-	symtab.add_type(Type::from_body(qid![gui], TypeBody::Incomplete))?;
+	symtab.add_namespace(qid![io])?;
+	symtab.add_namespace(qid![gui])?;
 
 	macro_rules! map_primitive {
+		(io : $name:ident) => {
+			paste::expr! {
+				{
+					let t = Type::from_body(qid!(io:$name), TypeBody::Primitive(PrimitiveType::[<Io $name>]));
+					symtab.add_type(t.clone())?;
+					t
+				}
+			}
+		};
 		(gui : $name:ident) => {
 			paste::expr! {
 				{
@@ -72,6 +82,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	let toggle_button_t = map_primitive!(gui:ToggleButton);
 	let widget_t = map_primitive!(gui:Widget);
 	let window_t = map_primitive!(gui:Window);
+
+	let file_t = map_primitive!(io:File);
 
 	// It would have been nice to use resolve_spec_type! here, but
 	// we can't use it while building types...
@@ -142,10 +154,13 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiToggleButton) => { toggle_button_t.clone() };
 		(GuiWidget) => { widget_t.clone() };
 		(GuiWindow) => { window_t.clone() };
+		(IoFile) => { file_t.clone() };
+		(IoFileMut) => { file_t.clone() };
 	}
 	macro_rules! resolve_spec_type {
 		(MaybeStr) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(str_(), vec![])]) };
 		(MaybeIntU32) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(int_(), vec![])]) };
+		(MaybeIoFile) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(file_t.clone(), vec![])]) };
 		(Maybe) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(List) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(ListMut) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
@@ -154,6 +169,20 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($i:ident) => { SpecType::Type(resolve_type!($i), vec![]) };
 	}
 
+	macro_rules! unpack_maybe {
+		($e:expr, $out:ident : $out_type:ty, |$arg:ident| $code:expr) => {
+			let $out = $e;
+			let ind = $out.unchecked_enum_index();
+			let $out: Option<$out_type> = match ind {
+				0 => None,
+				1 => {
+					let $arg = &$out.unchecked_enum_args()[0];
+					Some($code)
+				},
+				_ => unreachable!("bad Maybe")
+			};
+		};
+	}
 	macro_rules! unpack_type {
 		($out:ident, IntI32, $e:expr) => { let $out: i32 = $e.unchecked_int().try_into().unwrap(); };
 		($out:ident, IntU32, $e:expr) => { let $out: u32 = $e.unchecked_int().try_into().unwrap(); };
@@ -162,24 +191,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Real, $e:expr) => { let $out = $e.unchecked_real(); };
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
 		($out:ident, Str, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_str(); };
-		($out:ident, MaybeIntU32, $e:expr) => {
-			let $out = $e;
-			let ind = $out.unchecked_enum_index();
-			let $out: Option<u32> = match ind {
-				0 => None,
-				1 => Some($out.unchecked_enum_args()[0].unchecked_int().try_into().unwrap()),
-				_ => unreachable!("bad MaybeInt")
-			};
-		};
-		($out:ident, MaybeStr, $e:expr) => {
-			let $out = $e;
-			let ind = $out.unchecked_enum_index();
-			let $out = match ind {
-				0 => None,
-				1 => Some($out.unchecked_enum_args()[0].borrow_obj().unwrap().unchecked_str().clone()),
-				_ => unreachable!("bad MaybeStr")
-			};
-		};
+		($out:ident, MaybeIntU32, $e:expr) => { unpack_maybe!($e, $out: u32, |a| a.unchecked_int().try_into().unwrap()); };
+		($out:ident, MaybeStr, $e:expr) => { unpack_maybe!($e, $out: String, |a| a.borrow_obj().unwrap().unchecked_str().clone()); };
 		($out:ident, List, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_list(); };
 		($out:ident, ListMut, $e:expr) => { let mut $out = $e.borrow_obj_mut().unwrap(); let $out = $out.unchecked_list_mut(); };
 		($out:ident, Notifier, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_notifier(); };
@@ -197,6 +210,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, GuiWindow, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_gui_window(); };
 		($out:ident, Placeholder0, $e:expr) => { let $out = $e; };
 		($out:ident, Placeholder1, $e:expr) => { let $out = $e; };
+		($out:ident, IoFile, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_io_file(); };
+		($out:ident, IoFileMut, $e:expr) => { let mut $out = $e.borrow_obj_mut().unwrap(); let $out = $out.unchecked_io_file_mut(); };
 	}
 	macro_rules! convert_arg {
 		(SymbolTable, $arg:ident) => { (SpecType::Type(void_(), vec![]), id!(_DUMMY)) };
@@ -206,6 +221,14 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, SymbolTable, $_arg_iter:expr, $symtab:expr) => { let $out = $symtab; };
 		($out:ident, $ty:ident, $arg_iter:expr, $_symtab:expr) => { unpack_type!($out, $ty, $arg_iter.next().unwrap()); };
 	}
+	macro_rules! pack_maybe {
+		($e:expr, |$v:ident| $code:expr) => {
+			match $e {
+				None => Value::Enum(0, vec![]),
+				Some($v) => Value::Enum(1, vec![$code])
+			}
+		};
+	}
 	macro_rules! pack_type {
 		(IntI32, $e:expr) => { Value::Int($e.into()) };
 		(IntU32, $e:expr) => { Value::Int($e.into()) };
@@ -214,18 +237,9 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Real, $e:expr) => { Value::Real($e) };
 		(Bool, $e:expr) => { Value::Bool($e) };
 		(Str, $e:expr) => { Obj::Str($e).to_heap() };
-		(MaybeIntU32, $e:expr) => {
-			match $e {
-				None => Value::Enum(0, vec![]),
-				Some(s) => Value::Enum(1, vec![Value::Int(s.into())])
-			}
-		};
-		(MaybeStr, $e:expr) => {
-			match $e {
-				None => Value::Enum(0, vec![]),
-				Some(s) => Value::Enum(1, vec![Obj::Str(s.to_string()).to_heap()])
-			}
-		};
+		(MaybeIntU32, $e:expr) => { pack_maybe!($e, |s| Value::Int(s.into())) };
+		(MaybeStr, $e:expr) => { pack_maybe!($e, |s| Obj::Str(s.to_string()).to_heap()) };
+		(MaybeIoFile, $e:expr) => { pack_maybe!($e, |s| Obj::IoFile(Some(s)).to_heap()) };
 		(List, $e:expr) => { Obj::List($e).to_heap() };
 		(Void, $_:tt) => { Value::Void };
 		(Notifier, $e:expr) => { $e.to_heap() };
@@ -238,6 +252,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(GuiNotebook, $e:expr) => { $e };
 		(GuiToggleButton, $e:expr) => { $e };
 		(GuiWindow, $e:expr) => { $e };
+		(IoFile, $e:expr) => { Obj::IoFile($e).to_heap() };
 		(Placeholder0, $e:expr) => { $e };
 		(Placeholder1, $e:expr) => { $e };
 	}
@@ -692,6 +707,20 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	connect_gtk_container!(GuiWindow);
 	connect_gtk_widget!(GuiWindow);
 	connect_gtk_base_class!(GuiWindow, GuiContainer, GuiWidget);
+
+
+
+	// ****************************************
+	// IoFile
+	export!(MaybeIoFile, IoFile, open_read, |path: Str| {
+		OpenOptions::new().read(true).open(&path).ok()
+	});
+	export!(MaybeIoFile, IoFile, open_write, |path: Str| {
+		OpenOptions::new().write(true).create(true).open(&path).ok()
+	});
+	export!(MaybeIoFile, IoFile, open_append, |path: Str| {
+		OpenOptions::new().append(true).create(true).open(&path).ok()
+	});
 
 	Ok(())
 }

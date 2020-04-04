@@ -137,6 +137,7 @@ pub enum PrimitiveType {
 	Any, Void, Bool, Int, Real, Str, List,
 	GuiBox, GuiButton, GuiCheckButton, GuiComboBoxText, GuiContainer, GuiEntry,
 	GuiLabel, GuiNotebook, GuiToggleButton, GuiWidget, GuiWindow,
+	IoFile,
 	Notifier
 }
 
@@ -490,6 +491,19 @@ impl SymbolTable {
 		crate::stdlib::inject(&symtab_rc).expect("standard library injection failed");
 
 		symtab_rc
+	}
+
+	pub fn add_namespace(&mut self, qid: QualID) -> Result<(), SymTabError> {
+		let node = SymTabNode::new_namespace();
+		let (name, container) = qid.split_last().unwrap();
+		let container = self.root.resolve_mut(container).ok_or(SymTabError::MissingNamespace)?;
+		let hashmap = container.get_children_mut().ok_or(SymTabError::NamespaceOrTypeExpected)?;
+		if hashmap.contains_key(&name) {
+			Err(SymTabError::DuplicateName)
+		} else {
+			hashmap.insert(*name, node);
+			Ok(())
+		}
 	}
 
 	pub fn add_type(&mut self, typ: Type) -> Result<(), SymTabError> {

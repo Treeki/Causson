@@ -25,7 +25,8 @@ pub enum Obj {
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
 	GuiWidget { w: gtk::Widget },
 	GuiWindow { w: gtk::Window, destroy_notifier: Value },
-	Notifier(Vec<(Value, TypeRef, Symbol)>)
+	Notifier(Vec<(Value, TypeRef, Symbol)>),
+	IoFile(Option<std::fs::File>)
 }
 
 macro_rules! obj_type {
@@ -108,6 +109,7 @@ impl Obj {
 	obj_type_mut!(Record, Vec<Value>);
 	obj_type_mut!(List, Vec<Value>);
 	obj_type_mut!(Notifier, Vec<(Value, TypeRef, Symbol)>);
+	obj_type_mut!(IoFile, Option<std::fs::File>);
 
 	obj_type_gtk!(Box, []);
 	obj_type_gtk!(Button, [CheckButton, ToggleButton]);
