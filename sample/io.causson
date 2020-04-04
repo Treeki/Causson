@@ -1,0 +1,22 @@
+def main() -> void {
+	let f = io:File:open_write("test.txt")
+	match f {
+		Just(f) => {
+			print("Opened ok")
+			print()
+			print("Open? " + str:from(f.is_open))
+			print()
+			match f.write_text("hello this is a test") {
+				Just(n) => print("Written " + str:from(n) + " bytes")
+				None => print("Write failed")
+			}
+			print()
+			f.close()
+			print("Closed ok")
+			print()
+			print("Open? " + str:from(f.is_open))
+			print()
+		}
+		None    => print("Failed")
+	}
+}

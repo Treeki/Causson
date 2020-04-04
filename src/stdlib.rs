@@ -3,6 +3,7 @@ use crate::data::*;
 use crate::eval::*;
 use symbol::Symbol;
 use std::convert::TryInto;
+use std::io::prelude::*;
 use std::fs::OpenOptions;
 use gtk::prelude::*;
 use std::rc::Rc;
@@ -160,6 +161,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	macro_rules! resolve_spec_type {
 		(MaybeStr) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(str_(), vec![])]) };
 		(MaybeIntU32) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(int_(), vec![])]) };
+		(MaybeIntUsize) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(int_(), vec![])]) };
 		(MaybeIoFile) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Type(file_t.clone(), vec![])]) };
 		(Maybe) => { SpecType::Type(maybe_t.clone(), vec![SpecType::Placeholder(0)]) };
 		(List) => { SpecType::Type(list_t.clone(), vec![SpecType::Placeholder(0)]) };
@@ -192,6 +194,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		($out:ident, Bool, $e:expr) => { let $out = $e.unchecked_bool(); };
 		($out:ident, Str, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_str(); };
 		($out:ident, MaybeIntU32, $e:expr) => { unpack_maybe!($e, $out: u32, |a| a.unchecked_int().try_into().unwrap()); };
+		($out:ident, MaybeIntUsize, $e:expr) => { unpack_maybe!($e, $out: usize, |a| a.unchecked_int().try_into().unwrap()); };
 		($out:ident, MaybeStr, $e:expr) => { unpack_maybe!($e, $out: String, |a| a.borrow_obj().unwrap().unchecked_str().clone()); };
 		($out:ident, List, $e:expr) => { let $out = $e.borrow_obj().unwrap(); let $out = $out.unchecked_list(); };
 		($out:ident, ListMut, $e:expr) => { let mut $out = $e.borrow_obj_mut().unwrap(); let $out = $out.unchecked_list_mut(); };
@@ -238,6 +241,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 		(Bool, $e:expr) => { Value::Bool($e) };
 		(Str, $e:expr) => { Obj::Str($e).to_heap() };
 		(MaybeIntU32, $e:expr) => { pack_maybe!($e, |s| Value::Int(s.into())) };
+		(MaybeIntUsize, $e:expr) => { pack_maybe!($e, |s| Value::Int(s.try_into().unwrap())) };
 		(MaybeStr, $e:expr) => { pack_maybe!($e, |s| Obj::Str(s.to_string()).to_heap()) };
 		(MaybeIoFile, $e:expr) => { pack_maybe!($e, |s| Obj::IoFile(Some(s)).to_heap()) };
 		(List, $e:expr) => { Obj::List($e).to_heap() };
@@ -724,6 +728,26 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(MaybeIoFile, IoFile, open_append, |path: Str| {
 		OpenOptions::new().append(true).create(true).open(&path).ok()
 	});
+	export!(MaybeStr, IoFileMut, read_all_text, |this| {
+		this.as_ref().and_then(|mut f| {
+			let mut s = String::new();
+			match f.read_to_string(&mut s) {
+				Ok(_)  => Some(s),
+				Err(_) => None
+			}
+		})
+	});
+	export!(MaybeIntUsize, IoFileMut, write_text, |this, text: Str| {
+		this.as_ref().and_then(|mut f| f.write(&text.as_bytes()).ok())
+	});
+	export!(Bool, IoFile, is_open, |this| this.is_some());
+
+	// can't use export! for this as it replaces the Obj contents
+	// bit of a hack but it works for now
+	symtab.add_builtin_method(
+		true, &file_t, id!(close), &void_(), &[],
+		move |_, _, args| { *args[0].borrow_obj_mut().unwrap() = Obj::IoFile(None); Value::Void }
+	)?;
 
 	Ok(())
 }

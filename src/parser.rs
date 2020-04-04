@@ -30,7 +30,7 @@ pub enum ParserError {
 	BadMatchArmArguments,
 	NonExhaustiveMatchArms,
 	DuplicateMatchArms,
-	VariableNotFound,
+	VariableNotFound(Symbol),
 	ConstantNotFound,
 	MissingNamespace,
 	UnexpectedSpecialisation,
@@ -741,7 +741,7 @@ impl<'a> CodeParseContext<'a> {
 				return Ok((i, var_type.clone()));
 			}
 		}
-		Err(ParserError::VariableNotFound)
+		Err(ParserError::VariableNotFound(*sym))
 	}
 
 	fn scoped_typecheck_expr(&mut self, expr: &UncheckedExpr) -> Result<Expr> {
@@ -1150,7 +1150,7 @@ mod tests {
 		let e = cpc.typecheck_expr(&expr(LocalGet(id!(var))));
 		assert_eq!(e.unwrap().typ, TypeRef(symtab.int_type.clone(), vec![]));
 		let e = cpc.typecheck_expr(&expr(LocalGet(id!(nevar))));
-		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound);
+		assert!(e.is_err() && e.unwrap_err() == ParserError::VariableNotFound(id!(nevar)));
 
 		// Set
 		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Int(Ok(5))))));
