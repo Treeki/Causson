@@ -42,6 +42,29 @@ macro_rules! qid_combine {
 }
 
 pub type QualID = Vec<Symbol>;
+// would be nicer to have this as an impl of Display,
+// but QualID is an alias so Rust won't let us do that
+pub fn write_qid(output: &mut dyn std::io::Write, qid: &QualID) -> std::io::Result<()> {
+	for (index, sym) in qid.iter().enumerate() {
+		if index == 0 {
+			write!(output, "{}", *sym)?;
+		} else {
+			write!(output, ":{}", *sym)?;
+		}
+	}
+	Ok(())
+}
+
+pub fn fmt_qid(output: &mut fmt::Formatter<'_>, qid: &QualID) -> fmt::Result {
+	for (index, sym) in qid.iter().enumerate() {
+		if index == 0 {
+			write!(output, "{}", *sym)?;
+		} else {
+			write!(output, ":{}", *sym)?;
+		}
+	}
+	Ok(())
+}
 
 lazy_static! {
 	pub static ref DUMMY_ARG: Symbol = id!("_DUMMY");

@@ -5,6 +5,7 @@ use crate::stdlib;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::fmt;
 
 lazy_static! {
 	static ref ASSIGN_OP: Symbol = id!("=");
@@ -27,18 +28,50 @@ pub enum ParserError {
 	BadWhileConditionType,
 	BadMatchConditionType,
 	BadMatchArmChoiceName(Symbol),
-	BadMatchArmArguments,
+	BadMatchArmArguments(Symbol),
 	NonExhaustiveMatchArms,
-	DuplicateMatchArms,
+	DuplicateMatchArms(Symbol),
 	VariableNotFound(Symbol),
-	ConstantNotFound,
-	MissingNamespace,
+	ConstantNotFound(Symbol),
+	MissingNamespace(QualID),
 	UnexpectedSpecialisation,
 }
 pub type Result<T> = std::result::Result<T, ParserError>;
 
 impl From<SymTabError> for ParserError {
 	fn from(e: SymTabError) -> ParserError { ParserError::SymTab(e) }
+}
+impl fmt::Display for ParserError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		use ParserError::*;
+		match self {
+			SymTab(SymTabError::DuplicateName) => write!(f, "Duplicate name in the symbol table"),
+			SymTab(SymTabError::DuplicateOverload) => write!(f, "Duplicate overload defined for a function"),
+			SymTab(SymTabError::MissingNamespace) => write!(f, "Namespace cannot be found"),
+			SymTab(SymTabError::NamespaceOrTypeExpected) => write!(f, "Expected a namespace or a type, not this"),
+			TypeIsMissing(qid) => { write!(f, "Couldn't find the type ")?; fmt_qid(f, &qid) }
+			TypeIsIncomplete => write!(f, "Incomplete type was used"),
+			TypeExpected => write!(f, "Expected a type, not this"),
+			TypeDependencyCycle => write!(f, "A dependency cycle exists between types"),
+			FunctionIsMissing(name) => write!(f, "Could not find the function or method '{}'", name),
+			NoMatchingOverload(name) => write!(f, "Could not find a matching overload on the function or method '{}'", name),
+			TypeMismatch(a, b) => write!(f, "Expected types {:?} and {:?} to match, but they don't", a, b),
+			InvalidAssignTarget => write!(f, "Invalid expression on the left side of an assignment"),
+			InvalidCall => write!(f, "Calling something that is not callable"),
+			LocalCannotBeVoid => write!(f, "Local variables cannot be void"),
+			BadIfConditionType => write!(f, "If-then-else conditions must be bool"),
+			BadWhileConditionType => write!(f, "While conditions must be bool"),
+			BadMatchConditionType => write!(f, "Match conditions must be an enum of some kind"),
+			BadMatchArmChoiceName(name) => write!(f, "Match specifies the arm {}, which doesn't exist", name),
+			BadMatchArmArguments(name) => write!(f, "Match arm {} has the wrong amount of arguments", name),
+			NonExhaustiveMatchArms => write!(f, "Match expression does not cover every possible case"),
+			DuplicateMatchArms(name) => write!(f, "Match arm {} occurs multiple times", name),
+			VariableNotFound(name) => write!(f, "Could not find the variable {}", name),
+			ConstantNotFound(name) => write!(f, "Could not find the constant {}", name),
+			MissingNamespace(qid) => { write!(f, "Couldn't find the namespace ")?; fmt_qid(f, &qid) }
+			UnexpectedSpecialisation => write!(f, "Unexpected <...> specialisation")
+		}
+	}
 }
 
 impl Type {
@@ -837,11 +870,11 @@ impl<'a> CodeParseContext<'a> {
 			LocalSetResolved(_, _) => unreachable!(),
 			GlobalGet(typeref, sym) => {
 				// right now this is JUST for enum constants
-				let parent_node = symtab.root.resolve(&typeref.0).ok_or(ParserError::MissingNamespace)?;
+				let parent_node = symtab.root.resolve(&typeref.0).ok_or_else(|| ParserError::MissingNamespace(typeref.0.clone()))?;
 				let parent_typ = parent_node.get_type().ok_or_else(|| ParserError::TypeIsMissing(typeref.0.clone()))?;
 				let specials = typeref.1.iter().map(|tr| self.resolve_typeref(&symtab, &tr)).collect::<Result<Vec<TypeRef>>>()?;
-				let const_node = parent_node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound)?;
-				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound)?;
+				let const_node = parent_node.resolve(&[*sym]).ok_or(ParserError::ConstantNotFound(*sym))?;
+				let (typ, _) = const_node.get_constant().ok_or(ParserError::ConstantNotFound(*sym))?;
 				let typ = typ.fill_gap(&specials);
 
 				Ok(Expr { expr: GlobalGetResolved(TypeRef(parent_typ, specials), *sym), typ })
@@ -908,7 +941,7 @@ impl<'a> CodeParseContext<'a> {
 					let index = if arm_name == &"_" {
 						// default arm
 						if default_arm.is_some() {
-							return Err(ParserError::DuplicateMatchArms);
+							return Err(ParserError::DuplicateMatchArms(id!("_")));
 						}
 						None
 					} else {
@@ -916,10 +949,10 @@ impl<'a> CodeParseContext<'a> {
 						let i = choices.iter().position(|c| c.0 == *arm_name);
 						let i = i.ok_or(ParserError::BadMatchArmChoiceName(*arm_name))?;
 						if choices[i].1.len() != arm_args.len() {
-							return Err(ParserError::BadMatchArmArguments);
+							return Err(ParserError::BadMatchArmArguments(*arm_name));
 						}
 						if arm_exprs[i].is_some() {
-							return Err(ParserError::DuplicateMatchArms);
+							return Err(ParserError::DuplicateMatchArms(*arm_name));
 						}
 						for (arg_name, (arg_typespec, _)) in arm_args.iter().zip(&choices[i].1) {
 							self.locals.push((arg_typespec.fill_gap(&cond_expr.typ.1), *arg_name));
