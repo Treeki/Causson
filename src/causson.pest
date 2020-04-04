@@ -63,12 +63,13 @@ gFuncDef = {"def" ~ funcSpec ~ "->" ~ typeRef ~ "{" ~ codeBlock ~ "}"}
     funcSelfArg = {"self"}
 
 gComponentDef = {"component" ~ qualifiedID ~ "{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}"}
-  compSubDef = _{compMethod | compPropSet | compEventConnection | compInstance | compTransientAdd}
+  compSubDef = _{compMethod | compPropSet | compDynamic | compEventConnection | compInstance | compTransientAdd}
     compPropSet = {"." ~ id ~ "=" ~ expr}
     compTransientAdd = {"+" ~ expr}
     compEventConnection = {"." ~ id ~ "->" ~ (expr | ("{" ~ codeBlock ~ "}"))}
     compInstance = {(id ~ "=")? ~ typeRef ~ compInstanceArgs? ~ ("{" ~ NEWLINE* ~ (compSubDef ~ NEWLINE+)* ~ compSubDef? ~ "}")?}
       compInstanceArgs = {"(" ~ (expr ~ ",")* ~ expr? ~ ")"}
+    compDynamic = {"dynamic" ~ typeRef ~ id ~ "=" ~ expr}
     compMethod = {"def" ~ compMethodSpec ~ "->" ~ typeRef ~ "{" ~ codeBlock ~ "}"}
       compMethodSpec = {id ~ (("(" ~ ")") | ("(" ~ (typedID ~ ",")* ~ typedID ~ ")"))}
 

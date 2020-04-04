@@ -20,6 +20,8 @@ pub enum Obj {
 	GuiComboBoxText { w: gtk::ComboBoxText, changed_notifier: Value },
 	GuiContainer { w: gtk::Container },
 	GuiEntry { w: gtk::Entry, changed_notifier: Value },
+	GuiFrame { w: gtk::Frame },
+	GuiImage { w: gtk::Image },
 	GuiLabel { w: gtk::Label },
 	GuiNotebook { w: gtk::Notebook, pending_labels: Vec<String> },
 	GuiToggleButton { w: gtk::ToggleButton, clicked_notifier: Value, toggled_notifier: Value },
@@ -115,13 +117,15 @@ impl Obj {
 	obj_type_gtk!(Button, [CheckButton, ToggleButton]);
 	obj_type_gtk!(CheckButton, []);
 	obj_type_gtk!(ComboBoxText, []);
-	obj_type_gtk!(Container, [Box, Window]);
+	obj_type_gtk!(Container, [Box, Frame, Window]);
 	obj_type_gtk!(Entry, []);
+	obj_type_gtk!(Frame, []);
+	obj_type_gtk!(Image, []);
 	obj_type_gtk!(Label, []);
 	obj_type_gtk!(Notebook, []);
 	obj_type_mut_field!(GuiNotebook, pending_labels, Vec<String>);
 	obj_type_gtk!(ToggleButton, [CheckButton]);
-	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Label, Notebook, ToggleButton, Window]);
+	obj_type_gtk!(Widget, [Box, Button, CheckButton, ComboBoxText, Container, Entry, Frame, Image, Label, Notebook, ToggleButton, Window]);
 	obj_type_gtk!(Window, []);
 }
 

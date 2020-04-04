@@ -19,7 +19,7 @@ pub enum ParserError {
 	TypeDependencyCycle,
 	FunctionIsMissing(Symbol),
 	NoMatchingOverload,
-	TypeMismatch,
+	TypeMismatch(TypeRef, TypeRef),
 	InvalidAssignTarget,
 	InvalidCall,
 	LocalCannotBeVoid,
@@ -68,7 +68,7 @@ impl TypeRef {
 	}
 
 	fn ensure_equal(a: &TypeRef, b: &TypeRef) -> Result<()> {
-		TypeRef::err_if_not_equal(&a, &b, ParserError::TypeMismatch)
+		TypeRef::err_if_not_equal(&a, &b, ParserError::TypeMismatch(a.clone(), b.clone()))
 	}
 }
 
@@ -85,20 +85,37 @@ impl ParseContext {
 		let mut extra_defs = vec![];
 		for def in program {
 			if let GlobalDef::Component(comp_id, subdefs) = def {
-				fn grab_instances<'a>(instances: &mut Vec<&'a HLCompInstance>, subdef: &'a HLCompSubDef) {
-					if let HLCompSubDef::Instance(instance) = &subdef {
-						instances.push(instance);
-						for c in &instance.children {
-							grab_instances(instances, c)
+				// Extract the sub-definition tree as a flat list of
+				// instances, and a flat list of component-global subdefs
+				fn grab_bits<'a>(
+					instances: &mut Vec<&'a HLCompInstance>,
+					comp_global_subdefs: &mut Vec<&'a HLCompSubDef>,
+					subdef: &'a HLCompSubDef) {
+						match &subdef {
+							HLCompSubDef::Instance(instance) => {
+								instances.push(instance);
+								for c in &instance.children {
+									grab_bits(instances, comp_global_subdefs, c)
+								}
+							}
+							HLCompSubDef::EventConnection(_, _) => (),
+							HLCompSubDef::PropertySet(_, _) => (),
+							HLCompSubDef::TransientAdd(_) => (),
+							HLCompSubDef::Dynamic(_, _, _) | HLCompSubDef::Method(_, _, _, _) => {
+								comp_global_subdefs.push(subdef);
+							}
 						}
-					}
 				}
 
 				let mut instances = vec![];
-				let mut methods: HashMap<Symbol, &HLExpr> = HashMap::new();
+				let mut comp_global_subdefs = vec![];
 				for subdef in subdefs {
-					grab_instances(&mut instances, &subdef);
+					grab_bits(&mut instances, &mut comp_global_subdefs, &subdef);
+				}
 
+				// Pull out methods now, for dependency analysis of properties
+				let mut methods: HashMap<Symbol, &HLExpr> = HashMap::new();
+				for subdef in &comp_global_subdefs {
 					if let HLCompSubDef::Method(method_name, args, ret_type, code_expr) = subdef {
 						extra_defs.push(GlobalDef::Func(
 							qid_combine!(comp_id, *method_name),
@@ -111,7 +128,7 @@ impl ParseContext {
 					}
 				}
 
-				// First step, create all the stuff we need
+				// Create all the stuff we need
 				let mut instance_ids: Vec<Symbol> = vec![];
 				let mut notifier_ids: Vec<Symbol> = vec![];
 				let mut record_fields = vec![];
@@ -119,6 +136,9 @@ impl ParseContext {
 				let mut prop_update_methods: Vec<Symbol> = vec![];
 				let mut prop_updates: Vec<(Symbol, HLExpr, Symbol)> = vec![];
 
+				let mut field_init_info = vec![];
+
+				// Create fields for every instance
 				for (index, instance) in instances.iter().enumerate() {
 					let (instance_id, notifier_id) = match instance.name {
 						Some(field_name) => (field_name, id!(format!("_n_{}", field_name))),
@@ -129,20 +149,34 @@ impl ParseContext {
 
 					// Add a new field to the record
 					record_fields.push((instance.what.clone(), instance_id));
+					field_init_info.push((id!(new), instance.new_args.clone()));
 					record_fields.push((HLTypeRef(qid!(Notifier), vec![]), notifier_id));
-
-					// Initialise these in our 'new' function
-					// let instance_new_expr = HLExpr::ID(qid_combine!(&instance.what, id!(new)));
-					let instance_type_expr = instance.what.to_hl_expr();
-					let instance_new_expr = HLExpr::NamespaceAccess(Box::new(instance_type_expr), id!(new));
-					let instance_expr = HLExpr::Call(Box::new(instance_new_expr), instance.new_args.clone());
-					new_frag.push(HLExpr::Let(instance_id, Box::new(instance_expr)));
-
-					let notifier_type_expr = HLExpr::ID(id!(Notifier));
-					let notifier_new_expr = HLExpr::NamespaceAccess(Box::new(notifier_type_expr), id!(new));
-					let notifier_expr = HLExpr::Call(Box::new(notifier_new_expr), vec![]);
-					new_frag.push(HLExpr::Let(notifier_id, Box::new(notifier_expr)));
+					field_init_info.push((id!(new), vec![]));
 				}
+
+				// Create fields for every dynamic property
+				for subdef in &comp_global_subdefs {
+					if let HLCompSubDef::Dynamic(name, typ, expr) = subdef {
+						let notifier_id = id!(format!("_n_{}", name));
+						notifier_ids.push(notifier_id);
+
+						record_fields.push((typ.clone(), *name));
+						field_init_info.push((id!(default), vec![]));
+						record_fields.push((HLTypeRef(qid!(Notifier), vec![]), notifier_id));
+						field_init_info.push((id!(new), vec![]));
+					}
+				}
+
+				// Creation boilerplate
+				for (a, b) in record_fields.iter().zip(field_init_info) {
+					let (typ, field_id) = a;
+					let (new_id, new_args) = b;
+					let type_expr = typ.to_hl_expr();
+					let new_expr = HLExpr::NamespaceAccess(Box::new(type_expr), new_id);
+					let field_expr = HLExpr::Call(Box::new(new_expr), new_args);
+					new_frag.push(HLExpr::Let(*field_id, Box::new(field_expr)));
+				}
+
 
 				// Assemble the hierarchy
 				// This requires care, to keep the IDs in sync
@@ -248,6 +282,32 @@ impl ParseContext {
 				}
 
 				let mut next_callback_id = 0;
+				let generate_updater = |callback_id: usize,
+										prop_expr: HLExpr,
+										value_expr: HLExpr,
+										deps: Vec<(HLExpr, Symbol)>,
+										extra_defs: &mut Vec<GlobalDef>,
+										prop_updates: &mut Vec<(Symbol, HLExpr, Symbol)>,
+										prop_update_methods: &mut Vec<Symbol>| {
+					let updater_id = id!(format!("_upd_{}", callback_id));
+
+					let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
+
+					let mut updater_qid = comp_id.clone();
+					updater_qid.push(updater_id);
+					extra_defs.push(GlobalDef::Func(
+						updater_qid,
+						FuncType::Method,
+						vec![],
+						HLTypeRef(qid!(void), vec![]),
+						set_expr
+					));
+
+					prop_update_methods.push(updater_id);
+					for (dep_obj, dep_prop) in deps {
+						prop_updates.push((updater_id, dep_obj, dep_prop));
+					}
+				};
 
 				for (index, instance) in instances.iter().enumerate() {
 					let mut sub_index = index + 1;
@@ -295,32 +355,27 @@ impl ParseContext {
 									new_frag.push(set_expr);
 								} else {
 									// Make a method
-									let updater_id = id!(format!("_upd_{}", next_callback_id));
-									next_callback_id += 1;
-
 									let self_expr = HLExpr::ID(id!(self));
 									let parent_expr = HLExpr::PropAccess(Box::new(self_expr), instance_ids[index]);
 									let prop_expr = HLExpr::PropAccess(Box::new(parent_expr), *prop_id);
-									let set_expr = HLExpr::Binary(Box::new(prop_expr), id!("="), Box::new(value_expr.clone()));
-
-									let mut updater_qid = comp_id.clone();
-									updater_qid.push(updater_id);
-									extra_defs.push(GlobalDef::Func(
-										updater_qid,
-										FuncType::Method,
-										vec![],
-										HLTypeRef(qid!(void), vec![]),
-										set_expr
-									));
-
-									prop_update_methods.push(updater_id);
-									for (dep_obj, dep_prop) in deps {
-										prop_updates.push((updater_id, dep_obj, dep_prop));
-									}
+									generate_updater(next_callback_id, prop_expr, value_expr.clone(), deps, &mut extra_defs, &mut prop_updates, &mut prop_update_methods);
+									next_callback_id += 1;
 								}
 							}
+							HLCompSubDef::Dynamic(_, _, _) => {}
 							HLCompSubDef::Method(_, _, _, _) => {}
 						}
+					}
+				}
+
+				// Build update machinery for dynamic properties
+				for subdef in &comp_global_subdefs {
+					if let HLCompSubDef::Dynamic(name, typ, expr) = subdef {
+						let deps = scan_dependencies(expr, &methods)?;
+						let self_expr = HLExpr::ID(id!(self));
+						let prop_expr = HLExpr::PropAccess(Box::new(self_expr), *name);
+						generate_updater(next_callback_id, prop_expr, expr.clone(), deps, &mut extra_defs, &mut prop_updates, &mut prop_update_methods);
+						next_callback_id += 1;
 					}
 				}
 
@@ -365,12 +420,14 @@ impl ParseContext {
 				));
 
 				// Last but not least, generate custom setters that call our notifiers
-				for ((instance, instance_id), notifier_id) in instances.iter().zip(instance_ids).zip(notifier_ids) {
+				let mut generate_setter = |field_id: Symbol,
+										   notifier_id: Symbol,
+										   typ: HLTypeRef| {
 					let mut code = vec![];
 
 					// Write it using the renamed default setter
 					let self_expr = HLExpr::ID(id!(self));
-					let defsetter_id = id!(format!("_set_{}", instance_id));
+					let defsetter_id = id!(format!("_set_{}", field_id));
 					let defsetter_expr = HLExpr::PropAccess(Box::new(self_expr), defsetter_id);
 					let v_expr = HLExpr::ID(id!(v));
 					code.push(HLExpr::Call(Box::new(defsetter_expr), vec![v_expr]));
@@ -382,14 +439,23 @@ impl ParseContext {
 					code.push(HLExpr::Call(Box::new(notify_expr), vec![]));
 
 					let mut setter_qid = comp_id.clone();
-					setter_qid.push(id!(format!("{}=", instance_id)));
+					setter_qid.push(id!(format!("{}=", field_id)));
 					extra_defs.push(GlobalDef::Func(
 						setter_qid,
 						FuncType::Method,
-						vec![(instance.what.clone(), id!(v))],
+						vec![(typ, id!(v))],
 						HLTypeRef(qid!(void), vec![]),
 						HLExpr::CodeBlock(code)
 					));
+				};
+
+				for ((instance, instance_id), notifier_id) in instances.iter().zip(instance_ids).zip(notifier_ids) {
+					generate_setter(instance_id, notifier_id, instance.what.clone());
+				}
+				for subdef in &comp_global_subdefs {
+					if let HLCompSubDef::Dynamic(name, typ, _) = subdef {
+						generate_setter(*name, id!(format!("_n_{}", name)), typ.clone());
+					}
 				}
 			}
 		}
@@ -1156,7 +1222,10 @@ mod tests {
 		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Int(Ok(5))))));
 		assert_eq!(e.unwrap().typ, TypeRef(symtab.int_type.clone(), vec![]));
 		let e = cpc.typecheck_expr(&expr(LocalSet(id!(var), box_expr(Bool(false)))));
-		assert!(e.is_err() && e.unwrap_err() == ParserError::TypeMismatch);
+		match e {
+			Err(ParserError::TypeMismatch(_, _)) => {/*ok*/}
+			_ => panic!("expected TypeMismatch")
+		}
 	}
 
 	#[test]

@@ -253,6 +253,13 @@ fn parse_comp_subdef(pair: Pair) -> HLCompSubDef {
 			let expr = parse_hlexpr(pairs.next().unwrap());
 			HLCompSubDef::PropertySet(id, expr)
 		},
+		Rule::compDynamic => {
+			let mut pairs = pair.into_inner();
+			let ret_type = parse_type_ref(pairs.next().unwrap());
+			let id = parse_id(pairs.next().unwrap());
+			let expr = parse_hlexpr(pairs.next().unwrap());
+			HLCompSubDef::Dynamic(id, ret_type, expr)
+		}
 		Rule::compMethod => {
 			let mut pairs = pair.into_inner();
 			let spec = pairs.next().unwrap();

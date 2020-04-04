@@ -161,6 +161,7 @@ impl HLExpr {
 					do_indent(output, indent + 1)?;
 					write!(output, "}}")?;
 				}
+				writeln!(output)?;
 				do_indent(output, indent)?;
 				write!(output, "}}")?;
 			}

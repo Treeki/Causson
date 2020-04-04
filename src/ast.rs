@@ -116,6 +116,7 @@ pub enum HLCompSubDef {
 	PropertySet(Symbol, HLExpr),
 	EventConnection(Symbol, HLExpr),
 	TransientAdd(HLExpr),
+	Dynamic(Symbol, HLTypeRef, HLExpr),
 	Method(Symbol, Vec<HLFuncArg>, HLTypeRef, HLExpr)
 }
 
@@ -137,7 +138,7 @@ pub type Program = Vec<GlobalDef>;
 pub enum PrimitiveType {
 	Any, Void, Bool, Int, Real, Str, List,
 	GuiBox, GuiButton, GuiCheckButton, GuiComboBoxText, GuiContainer, GuiEntry,
-	GuiLabel, GuiNotebook, GuiToggleButton, GuiWidget, GuiWindow,
+	GuiFrame, GuiImage, GuiLabel, GuiNotebook, GuiToggleButton, GuiWidget, GuiWindow,
 	IoFile,
 	Notifier
 }
