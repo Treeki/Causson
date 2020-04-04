@@ -156,7 +156,7 @@ impl ParseContext {
 
 				// Create fields for every dynamic property
 				for subdef in &comp_global_subdefs {
-					if let HLCompSubDef::Dynamic(name, typ, expr) = subdef {
+					if let HLCompSubDef::Dynamic(name, typ, _expr) = subdef {
 						let notifier_id = id!(format!("_n_{}", name));
 						notifier_ids.push(notifier_id);
 
@@ -370,7 +370,7 @@ impl ParseContext {
 
 				// Build update machinery for dynamic properties
 				for subdef in &comp_global_subdefs {
-					if let HLCompSubDef::Dynamic(name, typ, expr) = subdef {
+					if let HLCompSubDef::Dynamic(name, _typ, expr) = subdef {
 						let deps = scan_dependencies(expr, &methods)?;
 						let self_expr = HLExpr::ID(id!(self));
 						let prop_expr = HLExpr::PropAccess(Box::new(self_expr), *name);

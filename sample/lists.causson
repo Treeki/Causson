@@ -1,10 +1,10 @@
 def print_list_members(List<int> list) -> void {
 	print("Count: ")
-	print(str:from(list.len()))
+	print(str:from(list.length()))
 	print()
 
 	let index = 0
-	while index < list.len() {
+	while index < list.length() {
 		print("Element ")
 		print(str:from(index))
 		print(": ")
@@ -17,7 +17,7 @@ def print_list_members(List<int> list) -> void {
 def main() -> void {
 	let list = List<int>:new()
 
-	print(str:from(list.len()))
+	print(str:from(list.length()))
 	print()
 
 	list.push(5)

@@ -552,7 +552,7 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	// ****************************************
 	// List
 	export!(List, List, new, || vec![]);
-	export_getter!(List, len: IntUsize, |this| this.len());
+	export_getter!(List, length: IntUsize, |this| this.len());
 	export!(Void, ListMut, push, |this, v: Placeholder0| this.push(v.clone()));
 	export!(Placeholder0, ListMut, pop, |this, i: IntUsize| this.remove(i));
 	export!(Placeholder0, List, get, |this, i: IntUsize| this[i].clone());
@@ -584,6 +584,16 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, qid!(gui:init), || gtk::init().expect("GTK init failed"));
 	export!(Void, qid!(gui:run), || gtk::main());
 	export!(Void, qid!(gui:quit), || gtk::main_quit());
+
+	export!(Void, qid!(gui:alert), |message: Str| {
+		let dlg = gtk::MessageDialog::new::<gtk::Window>(None,
+			gtk::DialogFlags::DESTROY_WITH_PARENT | gtk::DialogFlags::MODAL,
+			gtk::MessageType::Info,
+			gtk::ButtonsType::Ok,
+			&message);
+		dlg.run();
+		dlg.destroy();
+	});
 
 	// ****************************************
 	// GuiBox

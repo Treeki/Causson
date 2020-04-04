@@ -47,6 +47,11 @@ component ComboBoxDemo {
 	def root() -> gui:Widget { gui:Widget:from(self.box) }
 }
 
+type Topping = enum(\
+	Cheese, Tomato, Chicken, Oregano, Pepperoni, \
+	SweetCheese, Mallows, Beef, Bacon, Haggis, \
+	Haggis2, Chorizo, Beans, Tuna)
+
 component PizzaSizeChooser {
 	combo = gui:ComboBoxText {
 		+"Small - 4 slices (£4.00)"
@@ -81,8 +86,8 @@ component PizzaSizeChooser {
 component PizzaToppingsChooser {
 	toppingPrice = int(0)
 	dynamic int price = \
-		if self.selectedToppingCount() > 4 {
-			self.toppingPrice * (self.selectedToppingCount() - 4)
+		if self.selectedToppingCount > 4 {
+			self.toppingPrice * (self.selectedToppingCount - 4)
 		} else {
 			0
 		}
@@ -98,41 +103,45 @@ component PizzaToppingsChooser {
 					.label = "Cheese"
 					.active = true
 				}
-				tomato = gui:CheckButton { .label = "Sun-dried tomatoes" }
-				chicken = gui:CheckButton { .label = "Grilled chicken" }
-				oregano = gui:CheckButton { .label = "Hand-chopped oregano" }
-				pepperoni = gui:CheckButton { .label = "Pepperoni (sliced)" }
+				tomato      = gui:CheckButton { .label = "Sun-dried tomatoes" }
+				chicken     = gui:CheckButton { .label = "Grilled chicken" }
+				oregano     = gui:CheckButton { .label = "Hand-chopped oregano" }
+				pepperoni   = gui:CheckButton { .label = "Pepperoni (sliced)" }
 				sweetCheese = gui:CheckButton { .label = "Sweet cheese" }
-				mallows = gui:CheckButton { .label = "Marshmallows" }
+				mallows     = gui:CheckButton { .label = "Marshmallows" }
 			}
 			gui:Box(gui:Orientation:Vertical) {
-				beef = gui:CheckButton { .label = "Grounded beef" }
-				bacon = gui:CheckButton { .label = "Bacon pieces" }
-				haggis = gui:CheckButton { .label = "Homemade haggis" }
+				beef    = gui:CheckButton { .label = "Grounded beef" }
+				bacon   = gui:CheckButton { .label = "Bacon pieces" }
+				haggis  = gui:CheckButton { .label = "Homemade haggis" }
 				haggis2 = gui:CheckButton { .label = "Factory-made haggis" }
 				chorizo = gui:CheckButton { .label = "Spicy chorizo" }
-				beans = gui:CheckButton { .label = "Fairtrade coffee beans" }
-				tuna = gui:CheckButton { .label = "Dolphin-friendly tuna" }
+				beans   = gui:CheckButton { .label = "Fairtrade coffee beans" }
+				tuna    = gui:CheckButton { .label = "Dolphin-friendly tuna" }
 			}
 		}
 	}
 
-	def selectedToppingCount() -> int {
-		if self.cheese.active { 1 } else { 0 } + \
-		if self.tomato.active { 1 } else { 0 } + \
-		if self.chicken.active { 1 } else { 0 } + \
-		if self.oregano.active { 1 } else { 0 } + \
-		if self.pepperoni.active { 1 } else { 0 } + \
-		if self.sweetCheese.active { 1 } else { 0 } + \
-		if self.mallows.active { 1 } else { 0 } + \
-		if self.beef.active { 1 } else { 0 } + \
-		if self.bacon.active { 1 } else { 0 } + \
-		if self.haggis.active { 1 } else { 0 } + \
-		if self.haggis2.active { 1 } else { 0 } + \
-		if self.chorizo.active { 1 } else { 0 } + \
-		if self.beans.active { 1 } else { 0 } + \
-		if self.tuna.active { 1 } else { 0 }
+	def selectedToppings() -> List<Topping> {
+		let list = List<Topping>:new()
+		if self.cheese.active      { list.push(Topping:Cheese) }
+		if self.tomato.active      { list.push(Topping:Tomato) }
+		if self.chicken.active     { list.push(Topping:Chicken) }
+		if self.oregano.active     { list.push(Topping:Oregano) }
+		if self.pepperoni.active   { list.push(Topping:Pepperoni) }
+		if self.sweetCheese.active { list.push(Topping:SweetCheese) }
+		if self.mallows.active     { list.push(Topping:Mallows) }
+		if self.beef.active        { list.push(Topping:Beef) }
+		if self.bacon.active       { list.push(Topping:Bacon) }
+		if self.haggis.active      { list.push(Topping:Haggis) }
+		if self.haggis2.active     { list.push(Topping:Haggis2) }
+		if self.chorizo.active     { list.push(Topping:Chorizo) }
+		if self.beans.active       { list.push(Topping:Beans) }
+		if self.tuna.active        { list.push(Topping:Tuna) }
+		list
 	}
+
+	dynamic int selectedToppingCount = self.selectedToppings().length()
 
 	def root() -> gui:Widget { gui:Widget:from(self.box) }
 }
@@ -186,6 +195,7 @@ component PizzaDemo {
 
 			gui:Button {
 				.label = "Generate Order"
+				.clicked -> gui:alert("Hello")
 			}
 		}
 
