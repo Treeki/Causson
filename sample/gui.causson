@@ -13,12 +13,12 @@ component CompWind {
 
 			gui:Box(gui:Orientation:Vertical) {
 				.spacing = 10
-				gui:Label { .text = "Waffle" }
+				gui:Label { .text = "Test!" }
 				field = gui:Entry {
-					.placeholder_text = Maybe<str>:Just("Hello")
+					.placeholder_text = Maybe<str>:Just("This text gets copied to the button")
 				}
 				butt1 = gui:Button { .label = self.field.text }
-				butt2 = gui:Button { .label = "Butt2" }
+				butt2 = gui:Button { .label = "Button 2" }
 			}
 		}
 

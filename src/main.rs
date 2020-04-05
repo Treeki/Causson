@@ -42,11 +42,4 @@ fn main() {
     };
     let result = eval::call_func(&symtab_rc, &[], &[], id!(main), &[], &[], false).unwrap();
     println!("Program Result: {:?}", result);
-    data::MAIN_GC.with(|gc| {
-        println!("GC Nodes: {}", gc.node_count());
-        gc.dump();
-        gc.sweep();
-        println!("After sweep: GC Nodes: {}", gc.node_count());
-        gc.dump();
-    });
 }

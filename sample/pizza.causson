@@ -113,7 +113,7 @@ component PizzaSizeChooser {
 	def root() -> gui:Widget { gui:Widget:from(self.combo) }
 }
 
-component PizzaToppingsChooser {
+component ToppingsChooser {
 	toppingPrice = int(0)
 	includedToppings = int(0)
 	dynamic int price = \
@@ -202,7 +202,7 @@ component PizzaSauceChooser {
 	def root() -> gui:Widget { gui:Widget:from(self.box) }
 }
 
-component PizzaDemo {
+component PizzaForm {
 	box = gui:Box(gui:Orientation:Horizontal) {
 		.border_width = 10
 		.spacing = 10
@@ -225,7 +225,7 @@ component PizzaDemo {
 
 			gui:Frame {
 				.label = Maybe<str>:Just("Step 3: Pick toppings")
-				toppings = PizzaToppingsChooser {
+				toppings = ToppingsChooser {
 					.toppingPrice = self.size.toppingSurcharge
 					.includedToppings = self.size.includedToppings
 				}
@@ -255,10 +255,10 @@ component PizzaDemo {
 }
 
 
-component DemoWindow {
+component GoodpizzaApp {
 	wnd = gui:Window {
 		.title = "Pizza Ordering Demo"
-		PizzaDemo
+		PizzaForm
 		.destroy -> gui:quit()
 	}
 }
@@ -266,7 +266,7 @@ component DemoWindow {
 
 def main() -> void {
 	gui:init()
-	let w = DemoWindow:new()
+	let w = GoodpizzaApp:new()
 	w.wnd.show()
 	gui:run()
 }
