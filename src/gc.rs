@@ -24,6 +24,7 @@ impl<T> GC<T> where T: fmt::Debug {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub fn sweep(&self) {
 		unsafe {
 			let mut node_ref = &self.head;
@@ -78,6 +79,7 @@ impl<T> GC<T> where T: fmt::Debug {
 
 
 
+#[allow(dead_code)]
 pub struct GCNode<T> {
 	obj: RefCell<T>,
 	marked: Cell<bool>,

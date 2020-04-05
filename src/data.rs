@@ -10,6 +10,7 @@ thread_local!(pub static MAIN_GC: GC<Obj> = GC::new());
 
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Obj {
 	Str(String),
 	Record(Vec<Value>),
@@ -72,6 +73,7 @@ macro_rules! obj_type_gtk {
 					_ => panic!(concat!("Gui", stringify!($name), " heapobj expected"))
 				}
 			}
+			#[allow(dead_code)]
 			pub fn [<is_gui_ $name:snake>](&self) -> bool {
 				match self {
 					Obj::[<Gui $name>] { .. } => true,
