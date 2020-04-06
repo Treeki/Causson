@@ -1,3 +1,25 @@
+def bubble_sort(List<int> list) -> void {
+	let len = list.length
+	let running = true
+
+	while running {
+		let swapped = false
+		let i = 1
+		while i < len {
+			if list.get(i - 1) > list.get(i) {
+				let v = list.get(i)
+				list.set(i, list.get(i - 1))
+				list.set(i - 1, v)
+				swapped = true
+			}
+			i = i + 1
+		}
+		if swapped == false {
+			running = false
+		}
+	}
+}
+
 def print_list_members(List<int> list) -> void {
 	print("Count: ")
 	print(str:from(list.length()))
@@ -20,11 +42,23 @@ def main() -> void {
 	print(str:from(list.length()))
 	print()
 
-	list.push(5)
-	list.push(6)
-	list.push(7)
+	list.push(3)
+	list.push(96)
 	list.push(8)
-	list.push(9)
+	list.push(76)
+	list.push(2)
+	list.push(4)
+	list.push(1)
+	list.push(3)
+	list.push(100)
+	list.push(24)
+	list.push(-5442)
 
+	print("BEFORE SORTING:\n")
+	print_list_members(list)
+
+	bubble_sort(list)
+
+	print("AFTER SORTING:\n")
 	print_list_members(list)
 }

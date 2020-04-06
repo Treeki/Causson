@@ -556,6 +556,8 @@ pub fn inject(symtab_rc: &Rc<RefCell<SymbolTable>>) -> Result<(), SymTabError> {
 	export!(Void, ListMut, push, |this, v: Placeholder0| this.push(v.clone()));
 	export!(Placeholder0, ListMut, pop, |this, i: IntUsize| this.remove(i));
 	export!(Placeholder0, List, get, |this, i: IntUsize| this[i].clone());
+	export!(Void, ListMut, insert, |this, i: IntUsize, v: Placeholder0| this.insert(i, v.clone()));
+	export!(Void, ListMut, set, |this, i: IntUsize, v: Placeholder0| this[i] = v.clone());
 
 	// ****************************************
 	// Notifier

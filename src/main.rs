@@ -23,7 +23,18 @@ mod stdlib;
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
-    let code = std::fs::read_to_string(&args[1]).unwrap();
+    if args.len() < 2 {
+        println!("Please specify a source code file: {} something.causson", args[0]);
+        return
+    }
+    let code = match std::fs::read_to_string(&args[1]) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Unable to read file {}:", args[1]);
+            println!("{}", e);
+            return
+        }
+    };
     let parsed = match ast_builder::parse_causson_code(&code) {
         Ok(c) => c,
         Err(e) => {

@@ -30,10 +30,9 @@ def Celsius:toState(self) -> WeatherState {
 }
 
 def str:from(WeatherState s) -> str {
-	if s.discriminant() == WeatherState:Hot.discriminant() {
-		"Yep"
-	} else {
-		"Nope"
+	match s {
+		Hot => "Yep"
+		_ => "Nope"
 	}
 }
 
@@ -48,4 +47,5 @@ def main() -> void {
 	Celsius:wrap(20.).toState()
 	let num = 5
 	print(str:from(num.addOne()))
+	print()
 }
